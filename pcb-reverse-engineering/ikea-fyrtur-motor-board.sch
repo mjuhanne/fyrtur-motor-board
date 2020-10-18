@@ -742,7 +742,7 @@ F 3 "" H 5050 2825 50  0001 C CNN
 	0    -1   -1   0   
 $EndComp
 Text GLabel 7825 2550 3    50   Input ~ 0
-LM_PWR
+PWR_EN
 Text GLabel 5075 2525 2    50   Input ~ 0
 PWR_EN
 Text GLabel 4975 2125 2    50   Input ~ 0
@@ -1259,7 +1259,7 @@ $EndComp
 NoConn ~ 1450 3750
 NoConn ~ 1450 3950
 Text Notes 4125 1850 0    50   ~ 0
-LM powered by PWR_EN, which turns on \nperif. pwr (HALL sensors + voltage sensing) with IC7
+LM321 is powered by PWR_EN, which turns on also \nperif. pwr (HALL sensors + voltage sensing) with IC7
 Text Notes 5250 4525 0    50   ~ 0
 High side mosfets turned on \nby double NPN transistor. \nLow side mosfets controlled \ndirectly by STM32
 Text Notes 5300 3575 0    50   ~ 0
