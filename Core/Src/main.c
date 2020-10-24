@@ -147,7 +147,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
 		if ( (length==0) && (uart_rx_buffer_len>0) ) {
 			// There was incomplete packet waiting for the rest of the data which never came..
-			// Send ERROR MSG
+			// Send ERROR MSG: Send back the number of bytes received and first four received bytes
 			uart_tx_buffer[0] = 0xde;
 			uart_tx_buffer[1] = 0xad;
 			uart_tx_buffer[2] = uart_rx_buffer_len;

@@ -17,7 +17,7 @@ uint8_t target_speed = 0; // target RPM
 uint32_t target_location = 0;
 
 uint8_t curr_pwm = 0;  // PWM setting
-int32_t location;	// location is the position of the curtain measured in HALL sensor ticks
+int32_t location = 0;	// location is the position of the curtain measured in HALL sensor ticks
 uint8_t resetting = 0;
 
 uint32_t hall_sys_ticks = 0;
@@ -55,12 +55,12 @@ enum motor_command command; // for deferring execution to main loop since we don
 #define CMD_RESET_SOFT_LIMIT	0xfa00
 
 
-#define CMD_STATUS 	0xcccc
-#define CMD_STATUS2 0xcccd
-#define CMD_STATUS3 0xccce
-#define CMD_STATUS4 0xccdd
-#define CMD_EXT_STATUS 0xccde
-#define CMD_EXT_LIMITS 0xccdf
+#define CMD_GET_STATUS 	0xcccc
+#define CMD_GET_STATUS2 0xcccd
+#define CMD_GET_STATUS3 0xccce
+#define CMD_GET_STATUS4 0xccdd
+#define CMD_GET_EXT_STATUS 0xccde
+#define CMD_GET_EXT_LIMITS 0xccdf
 
 uint32_t position100_to_location( float position ) {
 	if (position > 100)
@@ -208,6 +208,7 @@ void motor_up(uint8_t motor_speed) {
 	pwm_start(LOW2_PWM_CHANNEL);
 	target_speed = motor_speed;
 	TIM1->CCR4 = INITIAL_PWM;
+	curr_pwm = INITIAL_PWM;
 	HAL_GPIO_WritePin(HIGH_1_GATE_GPIO_Port, HIGH_1_GATE_Pin, GPIO_PIN_SET);
 	direction = Up;
 	status = Moving;
@@ -224,6 +225,7 @@ void motor_down(uint8_t motor_speed) {
 	pwm_start(LOW1_PWM_CHANNEL);
 	target_speed = motor_speed;
 	TIM1->CCR1 = INITIAL_PWM;
+	curr_pwm = INITIAL_PWM;
 	HAL_GPIO_WritePin(HIGH_2_GATE_GPIO_Port, HIGH_2_GATE_Pin, GPIO_PIN_SET);
 	direction = Down;
 	status = Moving;
@@ -255,7 +257,7 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 	cmd2 = rx_buffer[4];
 	uint16_t cmd = (cmd1 << 8) + cmd2;
 
-	uint8_t cmd_handled=1;
+	uint8_t cmd_handled = 1;
 
 	if (soft_lower_limit == 0) {
 		// TODO FIXME
@@ -264,7 +266,7 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 
 	switch (cmd) {
 
-		case CMD_STATUS:
+		case CMD_GET_STATUS:
 			{
 				tx_buffer[0] = 0x00;
 				tx_buffer[1] = 0xff;
@@ -360,11 +362,10 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 			{
 				soft_lower_limit = hard_lower_limit;
 				resetting=1;
-
 			}
 			break;
 
-		case CMD_EXT_STATUS:
+		case CMD_GET_EXT_STATUS:
 			{
 				tx_buffer[0] = 0x00;
 				tx_buffer[1] = 0xff;
@@ -378,7 +379,7 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 				*tx_bytes=8;
 			}
 			break;
-		case CMD_EXT_LIMITS:
+		case CMD_GET_EXT_LIMITS:
 			{
 				tx_buffer[0] = 0x00;
 				tx_buffer[1] = 0xff;
@@ -447,8 +448,8 @@ void motor_init() {
 	motor_stop();
 
 #ifdef AUTO_RESET
+	resetting = 1;
 	motor_up();
-	resetting=1;
 #endif
 }
 
