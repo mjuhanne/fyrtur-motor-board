@@ -10,6 +10,12 @@
 enum motor_status status;
 enum motor_direction direction;
 
+#define INITIAL_PWM 80
+#define GEAR_RATIO 189
+#define DEG_TO_LOCATION(x) (GEAR_RATIO * x / 360)
+
+uint32_t hard_lower_limit = GEAR_RATIO * (13 + 265.0/360);
+uint32_t soft_lower_limit;
 
 uint8_t default_speed = DEFAULT_TARGET_SPEED;
 uint8_t target_speed = 0; // target RPM
@@ -27,13 +33,6 @@ uint32_t hall_1_tick = 0;
 uint32_t hall_2_tick = 0;
 
 uint32_t movement_started_timestamp = 0;
-
-#define INITIAL_PWM 80
-#define GEAR_RATIO 189
-#define DEG_TO_LOCATION(x) (GEAR_RATIO * x / 360)
-
-uint32_t hard_lower_limit = GEAR_RATIO * (13 + 265.0/360);
-uint32_t soft_lower_limit;
 
 enum motor_command command; // for deferring execution to main loop since we don't want to invoke HAL_Delay in UARTinterrupt handler
 
@@ -215,6 +214,7 @@ void motor_up(uint8_t motor_speed) {
 }
 
 void motor_down(uint8_t motor_speed) {
+
 	// reset stall detection timeout
 	hall_sys_ticks = 0;
 	movement_started_timestamp = HAL_GetTick();
@@ -258,11 +258,6 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 	uint16_t cmd = (cmd1 << 8) + cmd2;
 
 	uint8_t cmd_handled = 1;
-
-	if (soft_lower_limit == 0) {
-		// TODO FIXME
-		Error_Handler();
-	}
 
 	switch (cmd) {
 
@@ -403,19 +398,19 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 
 		// one byte commands with parameter
 
-		if (cmd1==CMD_SET_SPEED) {
+		if (cmd1 == CMD_SET_SPEED) {
 			default_speed = cmd2;
 			if (target_speed != 0)
 				target_speed = cmd2;
 
-		} else if (cmd1==CMD_GO_TO) {
+		} else if (cmd1 == CMD_GO_TO) {
 			target_location = position100_to_location(cmd2);
 			if (target_location < location) {
 				command = MotorUp;
 			} else {
 				command = MotorDown;
 			}
-		} else if ((cmd1&0xf0)==CMD_EXT_GO_TO) {
+		} else if ((cmd1 & 0xf0) == CMD_EXT_GO_TO) {
 			uint16_t pos = ((cmd1 & 0x0f)<<8) + cmd2;
 			float pos2 = ((float)pos)/16;
 			target_location = position100_to_location(pos2);
@@ -427,14 +422,6 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 		}
 
 	}
-
-
-
-	if (soft_lower_limit == 0) {
-		// TODO FIXME
-		Error_Handler();
-	}
-
 
 	return 1;
 

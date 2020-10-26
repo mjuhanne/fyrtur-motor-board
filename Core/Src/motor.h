@@ -56,6 +56,8 @@ void motor_adjust_rpm();
 void motor_stall_check();
 void motor_process();
 
+void sanity_check();
+
 //void motor_stopped();
 
 #endif /* SRC_MOTOR_H_ */

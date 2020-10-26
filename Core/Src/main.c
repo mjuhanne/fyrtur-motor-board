@@ -67,8 +67,6 @@ uint8_t uart_int;
 uint16_t adc_buf[ADC_BUF_LEN];
 
 
-
-
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -159,9 +157,6 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 			HAL_UART_Transmit(&huart1, uart_tx_buffer, 8, 100);
 			uart_rx_buffer_len = 0;
 		}
-
-
-
 	}
 	else                /* DMA Rx Complete event */
 	{
@@ -227,11 +222,10 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
 	  __HAL_UART_DISABLE_IT(huart, UART_IT_ERR);
 
 	  if(huart->Instance == USART1) {
-
-	      //Restarting the RX, .. 1 byte. .. u8DATUartShortRxBuffer is My own rx buffer
-
+	      //Restarting the RX DMA
 	  	  HAL_UART_Receive_DMA(&huart1, (uint8_t*)uart_dma_rx_buffer, UART_DMA_BUF_SIZE);
-
+	  	  // Reset also the buffer pointer
+	  	  dma_uart_rx.prevCNDTR = UART_DMA_BUF_SIZE;
 	    }
 }
 
