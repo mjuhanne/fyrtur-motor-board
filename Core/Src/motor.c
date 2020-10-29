@@ -10,29 +10,48 @@
 enum motor_status status;
 enum motor_direction direction;
 
-#define INITIAL_PWM 80
 #define GEAR_RATIO 189
 #define DEG_TO_LOCATION(x) (GEAR_RATIO * x / 360)
 
+
+/* LOCATION is the spatial position of the curtain measured in motor revolutions. Due to additional gear mechanism, it takes
+ * GEAR_RATIO revolutions in order to actually reach 1 full revolution of the curtain rod. Motor revolution is detected by HALL sensor,
+ * which generates 1 interrupt (tick) per motor revolution.
+ *
+ * POSITION itself is a measure of curtain position reported by float between 0.0 (fully closed) and 100.0 (fully open) and can be
+ * calculated from LOCATION with location_to_position100 (and vice versa with position100_to_location).
+ *
+ * Maximum POSITION is affected by user-customizable soft_lower_limit (configured via CMD_SET_SOFT_LIMIT). In addition to this, there is
+ * the hard_lower_limit that mimics the "hard-coded / absolute" maximum open position of the original Fyrtur firmware. However this
+ * "maximum" position can be ignored using CMD_OVERRIDE_XXX commands and also be re-configured with CMD_SET_HARD_LIMIT command.
+ */
+uint32_t target_location = 0;
+int32_t location = 0;
 uint32_t hard_lower_limit = GEAR_RATIO * (13 + 265.0/360);
 uint32_t soft_lower_limit;
 
+/* the motor driver gate PWM duty cycle is initially 80/255 when first energized and then adjusted according to target_speed */
+#define INITIAL_PWM 80
+
 uint8_t default_speed = DEFAULT_TARGET_SPEED;
 uint8_t target_speed = 0; // target RPM
-
-uint32_t target_location = 0;
-
 uint8_t curr_pwm = 0;  // PWM setting
-int32_t location = 0;	// location is the position of the curtain measured in HALL sensor ticks
+
+/*
+ * When resetting we forget our position and wait until motor has stalled. When that happens, assume that we are in top
+ * position and reset location to 0.
+ */
 uint8_t resetting = 0;
 
-uint32_t hall_sys_ticks = 0;
-uint32_t hall_interval = 0; // how many milliseconds between hall sensor ticks
+/*
+ * count how many milliseconds since previous HALL sensor interrupt occurred
+ * in order to calculate hall_interval (and RPM) and also to detect motor stalling
+ */
+uint32_t hall_idle_time = 0;
 
-uint32_t hall_1_tick = 0;
-uint32_t hall_2_tick = 0;
+uint32_t hall_interval = 0; // how many milliseconds between hall sensor ticks (in order to calculate motor RPM)
 
-uint32_t movement_started_timestamp = 0;
+uint32_t movement_started_timestamp = 0;	// used for stall detection grace period (let motor some time to energize before applying stall detecion)
 
 enum motor_command command; // for deferring execution to main loop since we don't want to invoke HAL_Delay in UARTinterrupt handler
 
@@ -69,8 +88,10 @@ uint32_t position100_to_location( float position ) {
 
 
 float location_to_position100() {
-	if (resetting)
+	if (resetting) {
+		// When resetting we forget our position and return 50% instead
 		return 50;
+	}
 	if (location < 0) {
 		return 0;
 	}
@@ -83,7 +104,7 @@ float location_to_position100() {
 
 float get_rpm() {
 	if (hall_interval)
-		return 60*1000/189/hall_interval;
+		return 60*1000/GEAR_RATIO/hall_interval;
 	return 0;
 }
 
@@ -104,14 +125,13 @@ void process_location() {
 }
 
 void hall_sensor_callback( uint8_t sensor ) {
-	if (sensor==HALL_1_SENSOR) {
-		hall_1_tick++;
-		hall_interval = hall_sys_ticks;
-		hall_sys_ticks = 0;
+	if (sensor == HALL_1_SENSOR) {
+		hall_interval = hall_idle_time;	// update time passed between hall sensor interrupts
+		hall_idle_time = 0;
 		if (!resetting)
 			process_location();
-	} else if (sensor==HALL_2_SENSOR) {
-		hall_2_tick++;
+	} else if (sensor == HALL_2_SENSOR) {
+		// We actually use only HALL #1 sensor for RPM calculation and stall detection
 	}
 }
 
@@ -139,18 +159,22 @@ void motor_adjust_rpm() {
 	}
 }
 
+
+/*
+ * This is periodically (every 1 millisecond) called SysTick_Handler
+ */
 void motor_stall_check() {
 	if (status == Moving) {
 		// Count how many milliseconds since previous HALL sensor interrupt
 		// in order to calculate RPM and detect motor stalling
-		hall_sys_ticks ++;
+		hall_idle_time ++;
 		if (HAL_GetTick() - movement_started_timestamp > MOVEMENT_GRACE_PERIOD) {
 			// enough time has passed since motor is energized -> apply stall detection
 
-			if (hall_sys_ticks > HALL_TIMEOUT) {
+			if (hall_idle_time > HALL_TIMEOUT) {
 				// motor has stalled/stopped
 				motor_stopped();
-				hall_sys_ticks = 0;
+				hall_idle_time = 0;
 			}
 		}
 	}
@@ -164,25 +188,25 @@ void motor_stopped() {
 		if (resetting) {
 			// we reached top position
 			resetting = 0;
-			location = 0;
 		}
+
+		// If motor has stalled, we assume that we have reached the top position.
+		location = 0;
+
+		// De-energize the motor just in case..
 		motor_stop();
-		hall_sys_ticks = 0;
+		hall_idle_time = 0;
 	}
 }
 
 
 void motor_stop() {
+
+	// Make sure that all mosfets are off
 	pwm_stop(LOW1_PWM_CHANNEL);
 	pwm_stop(LOW2_PWM_CHANNEL);
+	// Remember also to set GPIO_PULLDOWN in HAL_TIM_MspPostInit ! (generated automatically by CubeMX)
 
-
-	// make sure that all mosfets are off
-
-	// remember also to set GPIO_PULLDOWN in HAL_TIM_MspPostInit !
-
-	//HAL_GPIO_WritePin(LOW_1_GATE_GPIO_Port, LOW_1_GATE_Pin, GPIO_PIN_RESET);
-	//HAL_GPIO_WritePin(LOW_2_GATE_GPIO_Port, LOW_2_GATE_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(HIGH_1_GATE_GPIO_Port, HIGH_1_GATE_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(HIGH_2_GATE_GPIO_Port, HIGH_2_GATE_Pin, GPIO_PIN_RESET);
 	TIM1->CCR1 = 0;
@@ -190,7 +214,7 @@ void motor_stop() {
 	status = Stopped;
 	direction = None;
 	curr_pwm = 0;
-	hall_interval=0;
+	hall_interval = 0;
 	target_speed = 0;
 }
 
@@ -198,7 +222,7 @@ void motor_stop() {
 
 void motor_up(uint8_t motor_speed) {
 	// reset stall detection timeout
-	hall_sys_ticks = 0;
+	hall_idle_time = 0;
 	movement_started_timestamp = HAL_GetTick();
 	motor_stop();
 	HAL_Delay(10);
@@ -216,7 +240,7 @@ void motor_up(uint8_t motor_speed) {
 void motor_down(uint8_t motor_speed) {
 
 	// reset stall detection timeout
-	hall_sys_ticks = 0;
+	hall_idle_time = 0;
 	movement_started_timestamp = HAL_GetTick();
 	motor_stop();
 	HAL_Delay(10);
@@ -356,7 +380,7 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 		case CMD_RESET_SOFT_LIMIT:
 			{
 				soft_lower_limit = hard_lower_limit;
-				resetting=1;
+				resetting = 1;
 			}
 			break;
 
@@ -374,6 +398,7 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 				*tx_bytes=8;
 			}
 			break;
+
 		case CMD_GET_EXT_LIMITS:
 			{
 				tx_buffer[0] = 0x00;
@@ -391,13 +416,10 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 
 		default:
 			cmd_handled=0;
-
 	}
 
 	if (!cmd_handled) {
-
 		// one byte commands with parameter
-
 		if (cmd1 == CMD_SET_SPEED) {
 			default_speed = cmd2;
 			if (target_speed != 0)
@@ -420,11 +442,9 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 				command = MotorDown;
 			}
 		}
-
 	}
 
 	return 1;
-
 }
 
 void motor_init() {
@@ -436,6 +456,7 @@ void motor_init() {
 
 #ifdef AUTO_RESET
 	resetting = 1;
+	location = hard_lower_limit; // assume we are at bottom position
 	motor_up();
 #endif
 }
