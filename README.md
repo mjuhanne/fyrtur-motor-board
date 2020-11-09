@@ -17,7 +17,7 @@ Although the new firmware can be used with original Ikea Fyrtur wireless (Zigbee
 
 ## Wiring and interface
 
-The motor is connected with 4 wires (TX, RX, GND, VCC) where TX and RX are UART lines operating at 2400 kbps  (8N1 = 1 start bit, 8 data bits,no parity, 1 stop bit) using 3.3V logic high. VCC is nominal 5.0-7.4 V.
+The motor is connected with 4 wires (TX, RX, GND, VCC) where TX and RX are UART lines operating at 2400 kbps (8N1 = 1 start bit, 8 data bits,no parity, 1 stop bit) using 3.3V logic high. VCC is nominal 5.0-7.4 V.
 
 ## Motor board reverse engineering
 
@@ -25,11 +25,12 @@ The motor is connected with 4 wires (TX, RX, GND, VCC) where TX and RX are UART 
 
 ## Command structure
 
-All the commands consist of 6 bytes and must follow this pattern:
+All the commands described below are almost identical to the ones used with original firmware, and try to mimic their functionality as well as possible. In addition there are few custom commands that extend further the usability of the motor module.
+Commands are sent to the motor module via UART line. They consist of 6 bytes and must follow this pattern:
 
 `(0x00 0xff 0x9a) DATA1 DATA2 CHECKSUM`
 
-Where first 3 bytes are the header, DATA1 and DATA2 are the command/argument bytes and CHECKSUM is a bitwise XOR of the DATA1 and DATA2 bytes.
+The first 3 bytes are the header, DATA1 and DATA2 are the command/argument bytes and CHECKSUM is a bitwise XOR of the DATA1 and DATA2 bytes.
 
 #### Normal commands
 
@@ -129,11 +130,35 @@ See Position chapter below for more information
   - POS = (X*256 + YZ) / 16
 - Checksum has to be calculated as with CMD_GO_TO.
 
-#####CMD_SET_SPEED
+#####CMD_EXT_SET_SPEED
 `00 ff 9a 20 XX CHECKSUM`
-- Set the motor speed to XX (in RPM). Normal values are between 1 and 25 RPM.
+- Set the motor speed to XX (in RPM). Normal values are between 1 and 25 RPM.In contrast to CMD_SET_DEFAULT SPEED, this will not be written to non-volatile memory which has limited write cycles. 
+This means that this command can be used to change motor speed real time without a fear of deteriorating flash memory.
 
-#####CMD_GET_EXT_STATUS
+#####CMD_EXT_SET_DEFAULT_SPEED
+`00 ff 9a 30 XX CHECKSUM`
+- Set the default motor speed to XX (in RPM). Normal values are between 1 and 25 RPM. In contrast to CMD_SET_SPEED, this will be written to non-volatile memory. 
+
+#####CMD_EXT_SET_MINIMUM_VOLTAGE
+`00 ff 9a 40 XX CHECKSUM`
+- Set the minimum operating voltage to XX. This can be used to protect the battery from under voltage condition. If operating voltage is below this setting, UART interface will function normally but motor will not engage. 
+- Minimum voltage = XX/16
+- XX : 0x00 (Bypass voltage check. Default setting)
+
+#####CMD_EXT_GET_VERSION
+`00 ff 9a cc dc CHECKSUM`
+- Get firmware version
+
+The motor module response consists of 8 bytes and follows this pattern:
+
+`0x00 0xff 0xd0 VERSION_MAJOR VERSION_MINOR MINIMUM_VOLTAGE CHECKSUM`
+ - The First 3 bytes is the header
+ - VERSION_MAJOR and VERSION_MINOR describe the firmware version (e.g. 0.7)
+ - MINIMUM_VOLTAGE is the minimum operating voltage (see CMD_SET_MINIMUM_VOLTAGE)
+ - CHECKSUM is a bitwise XOR of the (VERSION_MAJOR,VERSION_MINOR,MINIMUM_VOLTAGE) bytes.
+
+
+#####CMD_EXT_GET_STATUS
 `00 ff 9a cc de CHECKSUM`
 - Get extended status bytes.
 
@@ -147,9 +172,9 @@ The motor module response consists of 8 bytes and follows this pattern:
   - POS = POSITION_DEC + POSITION_FRAC/256).
  - CHECKSUM is a bitwise XOR of the (MODULE_STATUS,MOTOR_CURRENT,POSITION_DEC,POSITION_FRAC) bytes.
 
-#####CMD_GET_EXT_LIMITS
+#####CMD_EXT_GET_LIMITS
 `00 ff 9a cc df CHECKSUM`
-- Get extended limits/resetting data
+- Get limits/resetting data
 
 The motor module response consists of 8 bytes and follows this pattern:
 

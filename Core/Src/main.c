@@ -23,6 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "motor.h"
+#include "eeprom.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -85,7 +86,7 @@ static void MX_TIM3_Init(void);
 /* USER CODE BEGIN 0 */
 
 uint32_t get_voltage() {
-	return adc_buf[0];
+	return adc_buf[0];	// values stored in adc_buf are voltages * 30 * 16;
 }
 
 uint32_t get_motor_current() {
@@ -271,6 +272,16 @@ int main(void)
 
   HAL_TIM_Base_Start_IT(&htim3);
 
+  /* Unlock the Flash Program Erase controller */
+  HAL_FLASH_Unlock();
+
+  /* EEPROM Init */
+  if (EE_Init() != HAL_OK) {
+	  // Initing FLASH failed! This should not happen! We will try to continue anyway by setting default values
+	  motor_set_default_settings();
+  } else {
+	  motor_load_settings();
+  }
 
   /* USER CODE END 2 */
 
@@ -289,6 +300,7 @@ int main(void)
 
 
   motor_init();
+
   blink_led(500,2);
 
   while (1)
