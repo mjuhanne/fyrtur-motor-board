@@ -1,4 +1,4 @@
-# IKEA Fyrtyr roller blind custom firmware
+# IKEA Fyrtyr roller blind motor unit custom firmware
 
 **Table of Contents**
 
@@ -10,20 +10,73 @@ This is a custom firmware for the TQL25-KT972 motor module (powered by the STM32
 
 It mimics the functionality of the original firmware with following additions:
  * **Allow setting custom motor speed**: The full speed with original FW is a bit too noisy for my ears, especially when used to control morning sunlight in the bedroom. Now, it's possible to set the speed to 3 RPM and enjoy the completely silent operation, waking up to the sunlight instead of whirring noise :)
- * **Allow the use of 5-6 volt DC source:** Original firmware was intended to be used with chargeable battery which was protected from under-voltage by ceasing operation when voltage drops below 6 VDC. Our custom firmware instead is intended to be used with [custom Fyrtyr Wifi Module](https://github.com/mjuhanne/fyrtur-esp) (plugged to DC adapter) so the low voltage limit for motor operation is ignored, mitigating the need to shop for the harder-to-get 6-7.5 volt adapters.
+ * **Allow the use of 5-6 volt DC source:** Original firmware was intended to be used with chargeable battery which was protected from under-voltage by ceasing operation when voltage drops below 6 VDC. Our custom firmware instead is intended to be used with [custom Fyrtyr Wifi Module](https://github.com/mjuhanne/fyrtur-esp) (plugged to DC adapter) so the low voltage limit for motor operation is ignored, mitigating the need to shop for the harder-to-get 6-7.5 volt adapters. The minimum operating voltage check can be enabled though if one wants to use this with the original Zigbee module with battery.
  * **Allow finer curtain position handling:** Original firmware has 1% granularity for the curtain position (0% - 100%). This translates to 1.5 cm resolution when using blinds with 1.5m tall window. It doesn't sound much, but when using sunlight-blocking curtain a lot of sunlight can seep between lower curtain and window board from a 0.5-1.5 cm gap. The custom firmware allows setting target position with sub-percent resolution so curtain can be lowered more accurately.
 
 Although the new firmware can be used with original Ikea Fyrtur wireless (Zigbee) module, most of its additional features can only be used with [ESP8266/ESP32 based module using WiFi and MQTT connectivity](https://github.com/mjuhanne/fyrtur-esp)
 
-## Wiring and interface
+## Wiring and UART interface
 
 The motor is connected with 4 wires (TX, RX, GND, VCC) where TX and RX are UART lines operating at 2400 kbps (8N1 = 1 start bit, 8 data bits,no parity, 1 stop bit) using 3.3V logic high. VCC is nominal 5.0-7.4 V.
+
+### Installation
+
+**Note that disassembling the motor unit will most definitely void your warranty!**
+
+**Please first dump the original FW as below before proceeding to install custom firmware!**
+
+**This software is provided "as is". Use with caution and at your own risk! (See LICENSE file for DISCLAIMER)**
+
+#### Software installation
+For compiling the sources, install [STM32CubeIde](https://www.st.com/en/development-tools/stm32cubeide.html) (I used version 1.4.2) Alternatively, you can use binaries found in bin/ folder.
+
+#### Disassembly
+- Unscrew the 3 small screws on the plastic enclosure
+- Carefully lift the small aluminum tabs holding the alumimum tube in its place
+- (No need to disassemble the other side with the motor)
+- Motor driver module can be now detached from the tube/motor side.
+
+#### Debug/programming interface wiring
+
+To flash the motor unit firmware a STM programmer is needed (recommended one is [ST-Link V2](https://www.digikey.com/en/products/detail/stmicroelectronics/ST-LINK-V2/2214535) which can be had for about 20 EUR / 22 USD). 
+The programming mode that is used is Single-Wire Debug (SWD) instead of older JTAG. Solder 5 male Dupont wires to IO1 header as described below. Needed wires are GND, RST, SWCLK, SWDIO, 3V3 (3V3 is the square pin hole).
+
+![Fyrtur motor module SWD wiring](images/Fyrtur-motor-SWD-wiring-1.jpg)
+
+Then route the wires via holes in the the motor housing. You also need to carve a second narrow hole on the plastic end cap to fit the wires through (not shown in the picture).
+
+![Fyrtur motor module SWD wiring](images/Fyrtur-motor-SWD-wiring-3.jpg)
+
+Attach SWD wires to the flat cable that came with the ST-Link.
+![Fyrtur motor module SWD wiring #2](images/Fyrtur-motor-SWD-wiring-2.jpg)
+
+#### Firmware dumping with ST-Link V2:
+
+- External power (>= 4.0V) is required via the motor 7.4V pin
+- Launch STM32 ST-LINK Utility
+- Edit Target->Settings: 
+    Connection Settings: SWD, Frequency 480 Khz. Mode: Connect Under Reset, Debug in Low Power enable )
+    Reset Mode: Hardware reset
+- Connect to the target
+- (if connecting fails, re-check wiring. If connection to ST-Link seems finicky, try upgrading the ST-Link firmware)
+- Memory display: Address 0x08000000  with Size 0x8000 and Data width 32 bits (so total 32 KB flash size)
+- You should see the firmware now displayed. Save it to a binary file and backup it.
+
+
+#### (Custom) firmware installation with ST-Link V2:
+ - proceed with steps described above
+ - Click Target->Program & Verify
+ - Select custom/original firmware file (.bin)
+ - Make sure start address is 0x08000000
+ - Skip Flash Erase and Skip Flash Protection verification can be set
+ - Hit Start!
+
 
 ## Motor board reverse engineering
 
 *pcb-reverse-engineering/* folder contains very rough schematic of the motor board in PDF and KiCad project format. 
 
-## Command structure
+## UART interface command structure
 
 All the commands described below are almost identical to the ones used with original firmware, and try to mimic their functionality as well as possible. In addition there are few custom commands that extend further the usability of the motor module.
 Commands are sent to the motor module via UART line. They consist of 6 bytes and must follow this pattern:
@@ -34,35 +87,35 @@ The first 3 bytes are the header, DATA1 and DATA2 are the command/argument bytes
 
 #### Normal commands
 
-#####CMD_GO_TO
+##### CMD_GO_TO
 `00 ff 9a dd XX CHECKSUM`
 - Moves into position XX (between 0 and 100). 
 - Checksum has to be calculated as described above.
 
-#####CMD_UP
+##### CMD_UP
 `00 ff 9a 0a dd d7`
 - Starts winding up the blinds continously
 - This continues until resistance is met (See Position chapter below) Custom firmware also stops when position 0 is reached.
 
-#####CMD_DOWN
+##### CMD_DOWN
 `00 ff 9a 0a ee e4`
 - Starts winding down the blinds continously (until maximum length is reached. See Position chapter below)
 
-#####CMD_UP_17
+##### CMD_UP_17
 `00 ff 9a 0a 0d 07`
 - Rotates up the curtain rod 17 degrees (around 0.60cm). 
  - Note that in the original firmware this will for some reason convert to continous up movement (CMD_UP) if used when motor position is 0!
  - In custom firmware it will not move beyond the upper limit however.
 
-#####CMD_DOWN_17
+##### CMD_DOWN_17
 `00 ff 9a 0a 0e 04`
 - Rotates down the curtain rod 17 degrees (around 0.60cm). It will not move beyond lower limit however.
 
-#####CMD_STOP
+##### CMD_STOP
 `00 ff 9a 0a cc c6`
 - Stops the continous movement
 
-#####CMD_STATUS
+##### CMD_STATUS
 `00 ff 9a cc cc 00`
 - Polls the motor module for status update.
 
@@ -88,19 +141,19 @@ The motor module response consists of 8 bytes and follows this pattern:
 
 These can move blinds past the soft or hard limits (see Position chapter below)
 
-#####CMD_UP_90
+##### CMD_UP_90
 `00 ff 9a fa d1 2b`
 - Rotates the curtain rod up by 90 degrees (around 3cm)
 
-#####CMD_DOWN_90
+##### CMD_DOWN_90
 `00 ff 9a fa d2 28`
 - Rotates the curtain rod down by 90 degrees (around 3cm)
 
-#####CMD_UP_6
+##### CMD_UP_6
 `00 ff 9a fa d3 29`
 - Rotates the curtain rod up by 6 degrees (around 0.22cm)
 
-#####CMD_DOWN_6
+##### CMD_DOWN_6
 `00 ff 9a fa d4 2e`
 - Rotates the curtain rod down by 6 degrees (around 0.22cm)
 
@@ -108,44 +161,44 @@ These can move blinds past the soft or hard limits (see Position chapter below)
 #### Commands involving lower limits 
 See Position chapter below for more information
 
-#####CMD_SET_SOFT_LIMIT
+##### CMD_SET_SOFT_LIMIT
 `00 ff 9a fa ee 14`
 - Sets the lower curtain limit (pos=100) to the current curtain position.
 
-#####CMD_SET_HARD_MAXIMUM
+##### CMD_SET_HARD_MAXIMUM
 `00 ff 9a fa cc 36`
 - Sets the hard maximum lower limit (pos=100) to current curtain position.
 
-#####CMD_RESET_SOFT_LIMIT
+##### CMD_RESET_SOFT_LIMIT
 `00 ff 9a fa 00 fa`
 - Reset the soft lower limit to the previously hard maximum limit. Motor also loses its current position and must be reset by winding up the curtaing and engaging upper hard stop.
 
 
 #### Custom firmware commands
 
-#####CMD_EXT_GO_TO
+##### CMD_EXT_GO_TO
 `00 ff 9a 1X YZ CHECKSUM`
 - "Go to position" command with finer resolution (position is given between 0.0 and 100.0). 
 - Target position is given with XY.Z (lower 4 bits of the 1st byte + 2nd byte  = 12 bits total) where XY is the decimal part and Z is the fractional part.
   - POS = (X*256 + YZ) / 16
 - Checksum has to be calculated as with CMD_GO_TO.
 
-#####CMD_EXT_SET_SPEED
+##### CMD_EXT_SET_SPEED
 `00 ff 9a 20 XX CHECKSUM`
 - Set the motor speed to XX (in RPM). Normal values are between 1 and 25 RPM.In contrast to CMD_SET_DEFAULT SPEED, this will not be written to non-volatile memory which has limited write cycles. 
 This means that this command can be used to change motor speed real time without a fear of deteriorating flash memory.
 
-#####CMD_EXT_SET_DEFAULT_SPEED
+##### CMD_EXT_SET_DEFAULT_SPEED
 `00 ff 9a 30 XX CHECKSUM`
 - Set the default motor speed to XX (in RPM). Normal values are between 1 and 25 RPM. In contrast to CMD_SET_SPEED, this will be written to non-volatile memory. 
 
-#####CMD_EXT_SET_MINIMUM_VOLTAGE
+##### CMD_EXT_SET_MINIMUM_VOLTAGE
 `00 ff 9a 40 XX CHECKSUM`
 - Set the minimum operating voltage to XX. This can be used to protect the battery from under voltage condition. If operating voltage is below this setting, UART interface will function normally but motor will not engage. 
 - Minimum voltage = XX/16
 - XX : 0x00 (Bypass voltage check. Default setting)
 
-#####CMD_EXT_GET_VERSION
+##### CMD_EXT_GET_VERSION
 `00 ff 9a cc dc CHECKSUM`
 - Get firmware version
 
@@ -158,7 +211,7 @@ The motor module response consists of 8 bytes and follows this pattern:
  - CHECKSUM is a bitwise XOR of the (VERSION_MAJOR,VERSION_MINOR,MINIMUM_VOLTAGE) bytes.
 
 
-#####CMD_EXT_GET_STATUS
+##### CMD_EXT_GET_STATUS
 `00 ff 9a cc de CHECKSUM`
 - Get extended status bytes.
 
@@ -172,7 +225,7 @@ The motor module response consists of 8 bytes and follows this pattern:
   - POS = POSITION_DEC + POSITION_FRAC/256).
  - CHECKSUM is a bitwise XOR of the (MODULE_STATUS,MOTOR_CURRENT,POSITION_DEC,POSITION_FRAC) bytes.
 
-#####CMD_EXT_GET_LIMITS
+##### CMD_EXT_GET_LIMITS
 `00 ff 9a cc df CHECKSUM`
 - Get limits/resetting data
 
@@ -249,48 +302,4 @@ Our custom firmware reports the voltage correctly, but battery byte for now is f
 - To adjust the hard limit, navigate to desired position with "Overriding" move commands and call CMD_SET_HARD_MAXIMUM. This will change also the soft limit to the same value.
 
 ---
-
-## Installation
-
-**Note that disassembling the motor unit will most definitely void your warranty!**
-
-**Please first dump the original FW as below before proceeding to install custom firmware!**
-
-**This software is provided "as is". Use with caution and at your own risk! (See LICENSE file for DISCLAIMER)**
-
-### Software installation
-For compiling the sources, install [STM32CubeIde](https://www.st.com/en/development-tools/stm32cubeide.html) (I used version 1.4.2) Alternatively, you can use binaries found in bin/ folder.
-
-### Disassembly
-- Unscrew the 3 small screws on the plastic enclosure
-- Carefully lift the small aluminum tabs holding the alumimum tube in its place
-- (No need to disassemble the other side with the motor)
-- Motor driver module can be now detached from the tube/motor side.
-
-### Firmware dumping with ST-Link V2:
-
-- connect SWD wires to IO1 header: GND, RST, SWCLK, SWDIO, 3V3 (3V3 is the square pin hole)
-- External power (>= 4.0V) is required via 7.4V pin
-- Launch STM32 ST-LINK Utility
-- Edit Target->Settings: 
-    Connection Settings: SWD, Frequency 480 Khz. Mode: Connect Under Reset, Debug in Low Power enable )
-    Reset Mode: Hardware reset
-- Connect to the target
-- (if connecting fails, re-check wiring. If connection to ST-Link seems finicky, try upgrading the ST-Link firmware)
-- Memory display: Address 0x08000000  with Size 0x8000 and Data width 32 bits (so total 32 KB flash size)
-- You should see the firmware now displayed. Save it to a binary file and backup it.
-
-
-### (Custom) firmware installation with ST-Link V2:
- - proceed with steps described above
- - Click Target->Program & Verify
- - Select custom/original firmware file (.bin)
- - Make sure start address is 0x08000000
- - Skip Flash Erase and Skip Flash Protection verification can be set
- - Hit Start!
-
-
-
-
-
 
