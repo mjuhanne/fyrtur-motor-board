@@ -9,7 +9,7 @@
 This is a custom firmware for the TQL25-KT972 motor module (powered by the STM32F030K6T6 ARM microcontroller) used by IKEA Fyrtyr and Kadrilj roller blinds.
 
 It mimics the functionality of the original firmware with following additions:
- * **Allow setting custom motor speed**: The full speed with original FW is a bit too noisy for my ears, especially when used to control morning sunlight in the bedroom. Now, it's possible to set the speed to 3 RPM and enjoy the completely silent operation, waking up to the sunlight instead of whirring noise :)
+ * **Allow setting custom motor speed**: The full speed with original FW is a bit too noisy for my ears, especially when used to control morning sunlight in the bedroom. Now it's possible to set the speed to 3 RPM and enjoy the (almost) silent operation, waking up to the sunlight instead of whirring noise :)
  * **Allow the use of 5-6 volt DC source:** Original firmware was intended to be used with chargeable battery which was protected from under-voltage by ceasing operation when voltage drops below 6 VDC. Our custom firmware instead is intended to be used with [custom Fyrtyr Wifi Module](https://github.com/mjuhanne/fyrtur-esp) (plugged to DC adapter) so the low voltage limit for motor operation is ignored, mitigating the need to shop for the harder-to-get 6-7.5 volt adapters. The minimum operating voltage check can be enabled though if one wants to use this with the original Zigbee module with battery.
  * **Allow finer curtain position handling:** Original firmware has 1% granularity for the curtain position (0% - 100%). This translates to 1.5 cm resolution when using blinds with 1.5m tall window. It doesn't sound much, but when using sunlight-blocking curtain a lot of sunlight can seep between lower curtain and window board from a 0.5-1.5 cm gap. The custom firmware allows setting target position with sub-percent resolution so curtain can be lowered more accurately.
 
@@ -133,7 +133,7 @@ The motor module response consists of 8 bytes and follows this pattern:
 - Battery level 0x16 (30%(?))
 - Voltage around 7.0 Volts
 - Speed 0x19=25 RPM (full speed)
-- Position 0x32=50
+- Curtain position 0x32=50
 - Checksum 0xe5
 
 
@@ -221,7 +221,7 @@ The motor module response consists of 8 bytes and follows this pattern:
  - The First 3 bytes is the header
  - MODULE_STATUS (0=Stopped, 1=Moving, 2=Error)
  - MOTOR_CURRENT (in mA).
- - POSITION_DEC and POSITION_FRAC report the higher resolution position info
+ - POSITION_DEC and POSITION_FRAC report the curtain position with higher resolution
   - POS = POSITION_DEC + POSITION_FRAC/256).
  - CHECKSUM is a bitwise XOR of the (MODULE_STATUS,MOTOR_CURRENT,POSITION_DEC,POSITION_FRAC) bytes.
 
@@ -238,28 +238,30 @@ The motor module response consists of 8 bytes and follows this pattern:
 - HLL = Hard Lower Limit = HLL_1 * 256 + HLL_2
 - CHECKSUM is a bitwise XOR of the (RESETTING,SLL_1,SLL_2,HLL_1,HLL_2) bytes. 
 
-## Position
+## Curtain position
 
-Normally the motor unit reports its position as percentage of maximum operating distance (0 for upper limit and 100 for lower limit).
+Normally the motor unit reports the curtain position (after CMD_GET_STATUS command) as percentage of maximum operating distance (0 for upper limit and 100 for lower limit).
+If more accurate positioning is needed, use CMD_EXT_GET_STATUS command for sub-percent resolution.
 
-When first powered, the motor doesn't know it's position and it begins winding the blinds upwards (in original FW. Customizable in our FW).
-During this time position byte stands at 100. Rewinding continues until sufficient resistance occurs (motor is stalling) and now the motor detects the 
-curtain has been lifted to upmost position. Position is now reset to 0.
+When first powered the motor doesn't know the curtain position and it begins rewinding the curtain upwards (in original FW. Customizable in our FW).
+During this time position byte stands at 50 (sometimes at 100 in the original firmware). Rewinding continues until sufficient resistance occurs (motor is stalling). Now the motor assumes that 
+the curtain has been lifted to upmost position. Position is now reset to 0.
 
-When winding down the motor automatically stops when default maximum length (13 turns + 265 degrees) is been reached (HARD LOWER LIMIT).
+When lowering the curtain the motor automatically stops when either the soft lower limit or the hard lower limit (maximum curtain length, default value 13 turns + 265 degrees) has been reached.
 
-Motor can be commanded to move above (below) the upper (lower) limit with overriding move commands. In this case the motor will keep track of its position with internal counters. 
-It will however NOT describe the position in STATUS message, but position is truncated between 0 and 100.
+Curtain can raised above the high limit or lowered below the lower limit with overriding move commands. In this case the motor will keep track of its position with internal counters. 
+It will however NOT announce the position in STATUS message, but instead the position is truncated between 0 and 100.
 
-Maximum curtain length can be shortened by using CMD_SET_SOFT_LIMIT / CMD_SET_HARD_LIMIT commands. These will set the current motor position to 100 and will restrict normal movements below this limit. Reported motor position data is now scaled accordingly.
+Maximum curtain length can be shortened by using CMD_SET_SOFT_LIMIT / CMD_SET_HARD_LIMIT commands. These will set the current curtain position to 100 and will restrict normal movements below this limit. Reported curtain position data is now scaled accordingly.
 
-Soft lower limit can be reset via CMD_RESET_SOFT_LIMIT command. This will cause motor to lose its position and allow uninhibited movement
-to all directions. Position will be reported as 50 regardless of motor movement until blinds are winded up to hard stop (mechanical resistance), 
-after which motor considers to be in upmost position. Position now is now set to be 0 and normal operation can continue as described above.
+Soft lower limit can be reset via CMD_RESET_SOFT_LIMIT command. This will cause motor to ignore the curtain position and allow uninhibited movement
+to all directions. The soft lower limit is also reset to the current hard lower limit. Position will be reported as 50 regardless of motor movement until blinds are rolled up to hard stop (mechanical resistance), 
+after which motor considers the curtaing to be in upmost position. Position now is set to be 0 and normal operation can continue as described above.
 
-Difference between hard and soft limits is that soft limits are limited between 0 and hard limit (by default 13 turns+265 degrees), whereas hard limits
-are unrestricted in this way. Also when soft limit is reset, it's value is set to be the previously set hard limit. In original firmware, hard limits seem to withstand loss of power (most likely written to EEPROM/FLASH). This is currently unsupported in our custom firmware.
-Since hard limits cannot be restored to any default value, to extend the hard limit further one can only use overriding movement commands to lower the blinds and then invoke CMD_SET_HARD_LIMIT again.
+Difference between hard and soft limits is that soft limits can be set only between 0 and hard limit (by default 13 turns+265 degrees), whereas hard limits
+are unrestricted in this way. It is assumed that the hard limits are programmed by manufacturer (or a distributor, such as Ikea in this case) to match the curtain length of the end product.
+When soft limit is reset, it's value is set to be the current hard limit. In original firmware, hard limits seem to withstand loss of power (most likely written to EEPROM/FLASH). This is also how it is done on custom firmware.
+Since hard limits cannot be restored to any default value, to extend the hard limit further one can only use overriding movement commands to lower the curtain to the desired position and then invoke CMD_SET_HARD_LIMIT again.
 
 ## Battery and Voltage bytes
 
@@ -293,13 +295,13 @@ Below 6V the motor itself would not engage, but the motor module still responds 
 
 Our custom firmware reports the voltage correctly, but battery byte for now is fixed 0x12 (matching 7.0V)
 
-## Calibration in practice
+## Curtain position calibration in practice
 
-- If motor is powered up and doesn't know its position, it begins windind up until hard stop is met (see Position chapter above). After this the current motor position is reset to 0. Also the previously set lower limit is now enforced. This "upper limit reset" is done every time motor is winded up and it stalls.
-- To set lower limit, wind down to suitable position and call CMD_SET_SOFT_LIMIT (position is now reset to 100)
-- To adjust soft lower limit, move to suitable position and call CMD_SET_SOFT_LIMIT again. If this desirable position is outside current limits, we have to use the "Overriding" move commands to navigate the rest of the way.
-- To reset the soft limit, use CMD_RESET_SOFT_LIMIT command and wind up the motor to upper hard stop. Now position is reset to 0 and previously set soft limit is replaced with hard maximum limit.
-- To adjust the hard limit, navigate to desired position with "Overriding" move commands and call CMD_SET_HARD_MAXIMUM. This will change also the soft limit to the same value.
+- If motor module is powered up and doesn't know its position, it begins rolling up the curtain until motor stalls and its position is assumed to be 0 (see Position chapter above). The previously set lower limit is now enforced. This upper limit calibration is done also every time the curtain is rolled up until motor stalls.
+- To set lower limit, lower the curtain to suitable position and call CMD_SET_SOFT_LIMIT (position is now reset to 100 and scaled accordingly in other positions)
+- To adjust soft lower limit, move to suitable position and call CMD_SET_SOFT_LIMIT again. If this desirable position is outside current limits, we have to use the "Overriding" move commands to navigate the rest of the way past the limit.
+- To reset the soft lower limit, use CMD_RESET_SOFT_LIMIT command and roll up the curtain to upper hard stop (motor will stall). Now position is reset to 0 and previously set soft limit is replaced with hard lower limit.
+- To adjust the hard lower limit, navigate to desired position with "Overriding" move commands and call CMD_SET_HARD_MAXIMUM. This will reset also the soft limit to the same value.
 
----
+
 
