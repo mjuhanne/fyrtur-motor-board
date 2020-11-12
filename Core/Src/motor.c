@@ -22,14 +22,14 @@ enum motor_direction direction;
  * POSITION itself is a measure of curtain position reported by float between 0.0 (fully closed) and 100.0 (fully open) and can be
  * calculated from LOCATION with location_to_position100 (and vice versa with position100_to_location).
  *
- * Maximum POSITION is affected by user-customizable soft_lower_limit (configured via CMD_SET_SOFT_LIMIT). In addition to this, there is
- * the hard_lower_limit that mimics the "hard-coded / absolute" maximum open position of the original Fyrtur firmware. However this
- * "maximum" position can be ignored using CMD_OVERRIDE_XXX commands and also be re-configured with CMD_SET_HARD_LIMIT command.
+ * Maximum POSITION is affected by user-customizable max curtain length (configured via CMD_SET_MAX_CURTAIN_LENGTH). In addition to this,
+ * there is the "absolute" limit of full (factory defined) curtain length. However these limits can be ignored using CMD_OVERRIDE_XXX commands and also be
+ * re-configured with CMD_SET_MAX_CURTAIN_LENGTH / CMD_SET_FULL_CURTAIN_LENGTH commands.
  */
 uint32_t target_location = 0;
 int32_t location = 0;
-uint32_t hard_lower_limit = DEFAULT_HARD_LOWER_LIMIT;
-uint32_t soft_lower_limit;
+uint32_t full_curtain_length = DEFAULT_FULL_CURTAIN_LEN;
+uint32_t max_curtain_length;
 
 uint16_t minimum_voltage;	// value is minimum voltage * 16 (float stored as interger value)
 
@@ -74,9 +74,9 @@ enum motor_command command; // for deferring execution to main loop since we don
 #define CMD_OVERRIDE_DOWN_90	0xfad2
 #define CMD_OVERRIDE_UP_6		0xfad3
 #define CMD_OVERRIDE_DOWN_6		0xfad4
-#define CMD_SET_SOFT_LIMIT		0xfaee	// will be stored to flash memory
-#define CMD_SET_HARD_LIMIT		0xfacc	// will be stored to flash memory
-#define CMD_RESET_SOFT_LIMIT	0xfa00	// will cause soft limit to be reseted to same value as hard limit and to be stored to flash memory
+#define CMD_SET_MAX_CURTAIN_LENGTH	0xfaee	// will be stored to flash memory
+#define CMD_SET_FULL_CURTAIN_LENGTH	0xfacc	// will be stored to flash memory
+#define CMD_RESET_CURTAIN_LENGTH	0xfa00	// will cause maximum curtain length to be reseted to factory setting (full curtain length) and to be stored to flash memory
 
 #define CMD_GET_STATUS 	0xcccc
 #define CMD_GET_STATUS2 0xcccd
@@ -99,46 +99,36 @@ enum motor_command command; // for deferring execution to main loop since we don
 /****************** EEPROM variables ********************/
 
 typedef enum eeprom_var_t {
-	SOFT_LOWER_LIMIT_EEPROM = 0,
-	HARD_LOWER_LIMIT_EEPROM = 1,
+	MAX_CURTAIN_LEN_EEPROM = 0,
+	FULL_CURTAIN_LEN_EEPROM = 1,
 	MINIMUM_VOLTAGE_EEPROM = 2,
 	DEFAULT_SPEED_EEPROM = 3
 } eeprom_var_t;
 
 /* Virtual address defined by the user: 0xFFFF value is prohibited */
 uint16_t VirtAddVarTab[NB_OF_VAR] = {0x5555, 0x6666, 0x7777, 0x8888};
-//uint16_t VarDataTab[NB_OF_VAR] = {0, 0, 0};
-//uint16_t VarValue = 0;
 
-
-/*for (VarValue = 1; VarValue <= 0x1000; VarValue++)
-{
-  EE_WriteVariable(VirtAddVarTab[SOFT_LOWER_LIMIT_EEPROM], VarValue);
-}
-
-EE_ReadVariable(VirtAddVarTab[0], &VarDataTab[0]);
-*/
 
 void motor_set_default_settings() {
-	soft_lower_limit = DEFAULT_HARD_LOWER_LIMIT; // by default, soft_lower_limit is hard_lower_limit
-	hard_lower_limit = DEFAULT_HARD_LOWER_LIMIT;
+	max_curtain_length = DEFAULT_FULL_CURTAIN_LEN; // by default, max_curtain_length is full_curtain_length
+	full_curtain_length = DEFAULT_FULL_CURTAIN_LEN;
 	minimum_voltage = DEFAULT_MINIMUM_VOLTAGE;
 	default_speed = DEFAULT_TARGET_SPEED;
 }
 
 void motor_load_settings() {
 	uint16_t tmp;
-	if (EE_ReadVariable(VirtAddVarTab[SOFT_LOWER_LIMIT_EEPROM], &tmp) != 0) {
-		tmp = soft_lower_limit = DEFAULT_HARD_LOWER_LIMIT;	// by default, soft_lower_limit is hard_lower_limit
-		EE_WriteVariable(VirtAddVarTab[SOFT_LOWER_LIMIT_EEPROM], tmp);
+	if (EE_ReadVariable(VirtAddVarTab[MAX_CURTAIN_LEN_EEPROM], &tmp) != 0) {
+		tmp = max_curtain_length = DEFAULT_FULL_CURTAIN_LEN;	// by default, max_curtain_length is full_curtain_length
+		EE_WriteVariable(VirtAddVarTab[FULL_CURTAIN_LEN_EEPROM], tmp);
 	} else {
-		soft_lower_limit = tmp;
+		max_curtain_length = tmp;
 	}
-	if (EE_ReadVariable(VirtAddVarTab[HARD_LOWER_LIMIT_EEPROM], &tmp) != 0) {
-		tmp = hard_lower_limit = DEFAULT_HARD_LOWER_LIMIT;
-		EE_WriteVariable(VirtAddVarTab[HARD_LOWER_LIMIT_EEPROM], tmp);
+	if (EE_ReadVariable(VirtAddVarTab[FULL_CURTAIN_LEN_EEPROM], &tmp) != 0) {
+		tmp = full_curtain_length = DEFAULT_FULL_CURTAIN_LEN;
+		EE_WriteVariable(VirtAddVarTab[FULL_CURTAIN_LEN_EEPROM], tmp);
 	} else {
-		hard_lower_limit = tmp;
+		full_curtain_length = tmp;
 	}
 	if (EE_ReadVariable(VirtAddVarTab[MINIMUM_VOLTAGE_EEPROM], &tmp) != 0) {
 		minimum_voltage = DEFAULT_MINIMUM_VOLTAGE;
@@ -170,7 +160,7 @@ void motor_write_setting( eeprom_var_t var, uint16_t value ) {
 uint32_t position100_to_location( float position ) {
 	if (position > 100)
 		return 100;
-	return position*soft_lower_limit/100;
+	return position*max_curtain_length/100;
 }
 
 
@@ -182,10 +172,10 @@ float location_to_position100() {
 	if (location < 0) {
 		return 0;
 	}
-	if (location > soft_lower_limit) {
+	if (location > max_curtain_length) {
 		return 100;
 	}
-	return 100*location/soft_lower_limit;
+	return 100*location/max_curtain_length;
 }
 
 
@@ -404,7 +394,7 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 
 		case CMD_DOWN:
 			{
-				target_location = soft_lower_limit;
+				target_location = max_curtain_length;
 				command = MotorDown;
 			}
 			break;
@@ -421,8 +411,8 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 		case CMD_DOWN_17:
 			{
 				target_location += DEG_TO_LOCATION(17);
-				if (target_location > soft_lower_limit)
-					target_location = soft_lower_limit;
+				if (target_location > max_curtain_length)
+					target_location = max_curtain_length;
 				command = MotorDown;
 			}
 			break;
@@ -461,24 +451,25 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 			}
 			break;
 
-		case CMD_SET_SOFT_LIMIT:
+		case CMD_SET_FULL_CURTAIN_LENGTH:
 			{
-				motor_write_setting(SOFT_LOWER_LIMIT_EEPROM, location);
-				soft_lower_limit = location;
+				motor_write_setting(FULL_CURTAIN_LEN_EEPROM, location);
+				full_curtain_length = location;
+			}
+			// fall-through: maximum curtain length will be reset as well
+
+		case CMD_SET_MAX_CURTAIN_LENGTH:
+			{
+				motor_write_setting(MAX_CURTAIN_LEN_EEPROM, location);
+				max_curtain_length = location;
 			}
 			break;
 
-		case CMD_SET_HARD_LIMIT:
-			{
-				motor_write_setting(HARD_LOWER_LIMIT_EEPROM, location);
-				hard_lower_limit = location;
-			}
-			break;
 
-		case CMD_RESET_SOFT_LIMIT:
+		case CMD_RESET_CURTAIN_LENGTH:
 			{
-				motor_write_setting(SOFT_LOWER_LIMIT_EEPROM, hard_lower_limit);
-				soft_lower_limit = hard_lower_limit;
+				motor_write_setting(MAX_CURTAIN_LEN_EEPROM, full_curtain_length);
+				max_curtain_length = full_curtain_length;
 				resetting = 1;
 			}
 			break;
@@ -518,10 +509,10 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 				tx_buffer[1] = 0xff;
 				tx_buffer[2] = 0xdb;
 				tx_buffer[3] = resetting;
-				tx_buffer[4] = soft_lower_limit >> 8;
-				tx_buffer[5] = soft_lower_limit & 0xff;
-				tx_buffer[6] = hard_lower_limit >> 8;
-				tx_buffer[7] = hard_lower_limit & 0xff;
+				tx_buffer[4] = max_curtain_length >> 8;
+				tx_buffer[5] = max_curtain_length & 0xff;
+				tx_buffer[6] = full_curtain_length >> 8;
+				tx_buffer[7] = full_curtain_length & 0xff;
 				tx_buffer[8] = tx_buffer[3] ^ tx_buffer[4] ^ tx_buffer[5] ^ tx_buffer[6] ^ tx_buffer[7];
 				*tx_bytes=9;
 			}
@@ -579,7 +570,7 @@ void motor_init() {
 	command = NoCommand;
 	motor_stop();
 
-	location = soft_lower_limit; // assume we are at bottom position
+	location = max_curtain_length; // assume we are at bottom position
 
 #ifdef AUTO_RESET
 	resetting = 1;

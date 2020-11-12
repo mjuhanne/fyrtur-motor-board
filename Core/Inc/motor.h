@@ -16,7 +16,7 @@
 // If != 0,  motor will be stopped if voltage drops below minumum voltage (in order to protect battery)
 #define DEFAULT_MINIMUM_VOLTAGE 0	// voltage check is bypassed
 
-#define DEFAULT_HARD_LOWER_LIMIT GEAR_RATIO * (13 + 265.0/360)
+#define DEFAULT_FULL_CURTAIN_LEN GEAR_RATIO * (13 + 265.0/360)
 
 #define DEFAULT_TARGET_SPEED 18
 
