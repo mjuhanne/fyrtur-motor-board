@@ -112,6 +112,7 @@ void blink_led(int duration, int count) {
 }
 
 
+/* Called every 10ms by TIM3 */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 {
 	motor_adjust_rpm();

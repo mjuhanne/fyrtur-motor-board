@@ -9,11 +9,11 @@
 #define SRC_MOTOR_H_
 
 #define VERSION_MAJOR 0
-#define VERSION_MINOR 72
+#define VERSION_MINOR 73
 
 #define GEAR_RATIO 189
 
-// If != 0,  motor will be stopped if voltage drops below minumum voltage (in order to protect battery)
+// If != 0,  motor will be stopped if voltage drops below minimum voltage (in order to protect battery)
 #define DEFAULT_MINIMUM_VOLTAGE 0	// voltage check is bypassed
 
 #define DEFAULT_FULL_CURTAIN_LEN GEAR_RATIO * (13 + 265.0/360)
@@ -29,6 +29,7 @@
 enum motor_status {
 	Stopped,
 	Moving,
+	Stalled,
 	Error
 };
 

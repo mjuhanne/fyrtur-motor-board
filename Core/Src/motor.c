@@ -48,11 +48,13 @@ uint8_t resetting = 0;
 
 /*
  * count how many milliseconds since previous HALL sensor interrupt occurred
- * in order to calculate hall_interval (and RPM) and also to detect motor stalling
+ * in order to calculate hall_sensor_interval (and RPM) and also to detect motor stalling
  */
-uint32_t hall_idle_time = 0;
+uint32_t hall_sensor_idle_time = 0;
 
-uint32_t hall_interval = 0; // how many milliseconds between hall sensor ticks (in order to calculate motor RPM)
+uint32_t hall_sensor_ticks = 0;	// how many hall sensor ticks(signals) after movement
+
+uint32_t hall_sensor_interval = 0; // how many milliseconds between hall sensor ticks (used to calculate motor RPM)
 
 uint32_t movement_started_timestamp = 0;	// used for stall detection grace period (let motor some time to energize before applying stall detecion)
 
@@ -90,8 +92,10 @@ enum motor_command command; // for deferring execution to main loop since we don
 #define CMD_EXT_SET_SPEED 			0x20	// setting speed via this command will not alter non-volatile memory (so it's safe for limited write-cycle flash memory)
 #define CMD_EXT_SET_DEFAULT_SPEED 	0x30	// default speed will be stored to flash memory
 #define CMD_EXT_SET_MINIMUM_VOLTAGE	0x40	// minimum voltage. Will be stored to flash memory
+#define CMD_EXT_SET_LOCATION		0x50	// location is the lower 4 bits of the 1st byte + 2nd byte (1 sign bit + 11 bits of integer part)
 
 // commands without parameter
+#define CMD_EXT_GET_LOCATION 		0xccd0
 #define CMD_EXT_GET_VERSION 		0xccdc
 #define CMD_EXT_GET_STATUS 			0xccde
 #define CMD_EXT_GET_LIMITS 			0xccdf
@@ -147,7 +151,7 @@ void motor_load_settings() {
 
 void motor_write_setting( eeprom_var_t var, uint16_t value ) {
 	uint16_t tmp;
-	if (status == Stopped) {
+	if ( (status == Stopped) || (status == Stalled) ) {
 		// motor has to be stopped to change non-volatile settings (writing to FLASH should occur uninterrupted)
 		EE_ReadVariable(VirtAddVarTab[var], &tmp);
 		if (tmp != value) {
@@ -175,13 +179,16 @@ float location_to_position100() {
 	if (location > max_curtain_length) {
 		return 100;
 	}
-	return 100*location/max_curtain_length;
+	return 100*(float)location/max_curtain_length;
 }
 
 
 float get_rpm() {
-	if (hall_interval)
-		return 60*1000/GEAR_RATIO/hall_interval;
+	// There might be condition when right after the movement starts, the Hall sensor signal comes abruptly fast and
+	// motor speed is calculated to be erroneously high. To prevent stalling (because motor PWM is dropped too low),
+	// we report motor RPMS only after 2 hall sensor signals so that RPM can be calculated correctly
+	if ( (hall_sensor_ticks > 1) && (hall_sensor_interval) )
+		return 60*1000/GEAR_RATIO/hall_sensor_interval;
 	return 0;
 }
 
@@ -203,8 +210,9 @@ void process_location() {
 
 void hall_sensor_callback( uint8_t sensor ) {
 	if (sensor == HALL_1_SENSOR) {
-		hall_interval = hall_idle_time;	// update time passed between hall sensor interrupts
-		hall_idle_time = 0;
+		hall_sensor_ticks++;
+		hall_sensor_interval = hall_sensor_idle_time;	// update time passed between hall sensor interrupts
+		hall_sensor_idle_time = 0;
 		if (!resetting)
 			process_location();
 	} else if (sensor == HALL_2_SENSOR) {
@@ -213,45 +221,48 @@ void hall_sensor_callback( uint8_t sensor ) {
 }
 
 
+/* Called every 10ms by TIM3 */
 void motor_adjust_rpm() {
-	uint32_t speed = get_rpm();
-	if (speed < target_speed) {
-		if (curr_pwm < 255) {
-			curr_pwm ++;
-			if (direction == Up)
-				TIM1->CCR4 = curr_pwm;
-			else
-				TIM1->CCR1 = curr_pwm;
+	if (status == Moving) {
+		uint32_t speed = get_rpm();
+		if (speed < target_speed) {
+			if (curr_pwm < 255) {
+				curr_pwm ++;
+				if (direction == Up)
+					TIM1->CCR4 = curr_pwm;
+				else
+					TIM1->CCR1 = curr_pwm;
+			}
 		}
-	}
 
-	if (speed > target_speed) {
-		if (curr_pwm > 0) {
-			curr_pwm --;
-			if (direction == Up)
-				TIM1->CCR4 = curr_pwm;
-			else
-				TIM1->CCR1 = curr_pwm;
+		if (speed > target_speed) {
+			if (curr_pwm > 0) {
+				curr_pwm --;
+				if (direction == Up)
+					TIM1->CCR4 = curr_pwm;
+				else
+					TIM1->CCR1 = curr_pwm;
+			}
 		}
 	}
 }
 
 
 /*
- * This is periodically (every 1 millisecond) called SysTick_Handler
+ * This is periodically (every 1 millisecond) called by SysTick_Handler
  */
 void motor_stall_check() {
 	if (status == Moving) {
 		// Count how many milliseconds since previous HALL sensor interrupt
 		// in order to calculate RPM and detect motor stalling
-		hall_idle_time ++;
+		hall_sensor_idle_time ++;
 		if (HAL_GetTick() - movement_started_timestamp > MOVEMENT_GRACE_PERIOD) {
 			// enough time has passed since motor is energized -> apply stall detection
 
-			if (hall_idle_time > HALL_TIMEOUT) {
+			if (hall_sensor_idle_time > HALL_TIMEOUT) {
 				// motor has stalled/stopped
 				motor_stopped();
-				hall_idle_time = 0;
+				hall_sensor_idle_time = 0;
 			}
 		}
 	}
@@ -261,7 +272,7 @@ void motor_stopped() {
 	if (status != Stopped) {
 		// motor has stalled!
 
-		hall_interval = 0;
+		hall_sensor_interval = 0;
 		if (resetting) {
 			// we reached top position
 			resetting = 0;
@@ -272,7 +283,8 @@ void motor_stopped() {
 
 		// De-energize the motor just in case..
 		motor_stop();
-		hall_idle_time = 0;
+		status = Stalled;
+		hall_sensor_idle_time = 0;
 	}
 }
 
@@ -291,18 +303,21 @@ void motor_stop() {
 	status = Stopped;
 	direction = None;
 	curr_pwm = 0;
-	hall_interval = 0;
+	hall_sensor_interval = 0;
+	hall_sensor_ticks = 0;
 	target_speed = 0;
 }
 
 
 
 void motor_up(uint8_t motor_speed) {
-	// reset stall detection timeout
-	hall_idle_time = 0;
-	movement_started_timestamp = HAL_GetTick();
+
 	motor_stop();
 	HAL_Delay(10);
+	// reset stall detection timeout
+	hall_sensor_idle_time = 0;
+	hall_sensor_ticks = 0;
+	movement_started_timestamp = HAL_GetTick();
 
 	// turn on LOW2 PWM and HIGH1
 	pwm_start(LOW2_PWM_CHANNEL);
@@ -316,11 +331,12 @@ void motor_up(uint8_t motor_speed) {
 
 void motor_down(uint8_t motor_speed) {
 
-	// reset stall detection timeout
-	hall_idle_time = 0;
-	movement_started_timestamp = HAL_GetTick();
 	motor_stop();
 	HAL_Delay(10);
+	// reset stall detection timeout
+	hall_sensor_idle_time = 0;
+	hall_sensor_ticks = 0;
+	movement_started_timestamp = HAL_GetTick();
 
 	// turn on LOW1 PWM and HIGH2
 	pwm_start(LOW1_PWM_CHANNEL);
@@ -488,6 +504,20 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 			}
 			break;
 
+		case CMD_EXT_GET_LOCATION:
+			{
+				tx_buffer[0] = 0x00;
+				tx_buffer[1] = 0xff;
+				tx_buffer[2] = 0xd1;
+				tx_buffer[3] = location >> 8;
+				tx_buffer[4] = location & 0xff;
+				tx_buffer[5] = target_location >> 8;
+				tx_buffer[6] = target_location & 0xff;
+				tx_buffer[7] = tx_buffer[3] ^ tx_buffer[4] ^ tx_buffer[5] ^ tx_buffer[6];
+				*tx_bytes=8;
+			}
+			break;
+
 		case CMD_EXT_GET_STATUS:
 			{
 				tx_buffer[0] = 0x00;
@@ -495,11 +525,13 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 				tx_buffer[2] = 0xda;
 				tx_buffer[3] = status;
 				tx_buffer[4] = (uint8_t)(get_motor_current());
-				uint16_t pos = location_to_position100() * 256;
-				tx_buffer[5] = pos >> 8;
-				tx_buffer[6] = pos & 0xff;
-				tx_buffer[7] = tx_buffer[3] ^ tx_buffer[4] ^ tx_buffer[5] ^ tx_buffer[6];
-				*tx_bytes=8;
+				tx_buffer[5] = (uint8_t)get_rpm();
+				float pos2 = location_to_position100() * 256;
+				int pos = pos2;
+				tx_buffer[6] = pos >> 8;
+				tx_buffer[7] = pos & 0xff;
+				tx_buffer[8] = tx_buffer[3] ^ tx_buffer[4] ^ tx_buffer[5] ^ tx_buffer[6] ^ tx_buffer[7];
+				*tx_bytes=9;
 			}
 			break;
 
@@ -555,6 +587,10 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 					command = MotorDown;
 				}
 			}
+		} else if ((cmd1 & 0xf0) == CMD_EXT_SET_LOCATION) {
+			int16_t loc = ((cmd1 & 0x0f)<<8) + cmd2;
+			location = loc;
+			resetting = 0;
 		} else if (cmd1 == CMD_EXT_SET_MINIMUM_VOLTAGE) {
 			motor_write_setting(MINIMUM_VOLTAGE_EEPROM, cmd2);
 			minimum_voltage = cmd2;
