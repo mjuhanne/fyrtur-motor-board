@@ -23,6 +23,9 @@
 #ifndef __MAIN_H
 #define __MAIN_H
 
+// SLIM_BINARY disables few functionalities (mainly EEPROM code) so that the binary can be built with Debug mode. Normally keep this commented
+//#define SLIM_BINARY
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -63,7 +66,7 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
-void hall_sensor_callback( uint8_t sensor );
+void hall_sensor_callback( uint8_t sensor, uint8_t value );
 void motor_stopped();
 void motor_stall_check();
 void pwm_start(uint32_t channel);

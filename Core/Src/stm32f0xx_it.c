@@ -59,6 +59,7 @@
 extern DMA_HandleTypeDef hdma_adc;
 extern TIM_HandleTypeDef htim3;
 extern DMA_HandleTypeDef hdma_usart1_rx;
+extern DMA_HandleTypeDef hdma_usart1_tx;
 extern UART_HandleTypeDef huart1;
 /* USER CODE BEGIN EV */
 extern DMA_Event_t dma_uart_rx;
@@ -159,9 +160,6 @@ void SysTick_Handler(void)
 void EXTI0_1_IRQHandler(void)
 {
   /* USER CODE BEGIN EXTI0_1_IRQn 0 */
-  if(__HAL_GPIO_EXTI_GET_FLAG(HALL_2_OUT_Pin)){
-	  hall_sensor_callback(HALL_2_SENSOR);
-  }
 
   /* USER CODE END EXTI0_1_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_0);
@@ -176,9 +174,6 @@ void EXTI0_1_IRQHandler(void)
 void EXTI4_15_IRQHandler(void)
 {
   /* USER CODE BEGIN EXTI4_15_IRQn 0 */
-  if(__HAL_GPIO_EXTI_GET_FLAG(HALL_1_OUT_Pin)){
-	  hall_sensor_callback(HALL_1_SENSOR);
-	 }
 
   /* USER CODE END EXTI4_15_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_7);
@@ -209,6 +204,7 @@ void DMA1_Channel2_3_IRQHandler(void)
   /* USER CODE BEGIN DMA1_Channel2_3_IRQn 0 */
 
   /* USER CODE END DMA1_Channel2_3_IRQn 0 */
+  HAL_DMA_IRQHandler(&hdma_usart1_tx);
   HAL_DMA_IRQHandler(&hdma_usart1_rx);
   /* USER CODE BEGIN DMA1_Channel2_3_IRQn 1 */
 

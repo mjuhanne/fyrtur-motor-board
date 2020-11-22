@@ -52,6 +52,7 @@ TIM_HandleTypeDef htim3;
 
 UART_HandleTypeDef huart1;
 DMA_HandleTypeDef hdma_usart1_rx;
+DMA_HandleTypeDef hdma_usart1_tx;
 
 /* USER CODE BEGIN PV */
 
@@ -61,7 +62,7 @@ uint8_t uart_dma_rx_buffer[UART_DMA_BUF_SIZE]; // circular DMA rx buffer
 
 uint8_t uart_rx_buffer[UART_DMA_BUF_SIZE]; // contains newly received data
 uint16_t uart_rx_buffer_len = 0;
-uint8_t uart_tx_buffer[9];
+uint8_t uart_tx_buffer[16];
 
 uint8_t uart_int;
 
@@ -89,19 +90,24 @@ uint32_t get_voltage() {
 	return adc_buf[0];	// values stored in adc_buf are voltages * 30 * 16;
 }
 
+#ifndef SLIM_BINARY
 uint32_t get_motor_current() {
 	return adc_buf[1];
 }
+#endif
 
 void pwm_start( uint32_t channel ) {
-	HAL_TIM_PWM_Start(&htim1, channel);
+	if (htim1.Instance != NULL)
+		HAL_TIM_PWM_Start(&htim1, channel);
 
 }
 
 void pwm_stop( uint32_t channel ) {
-	HAL_TIM_PWM_Stop(&htim1, channel);
+	if (htim1.Instance != NULL)
+		HAL_TIM_PWM_Stop(&htim1, channel);
 }
 
+#ifndef SLIM_BINARY
 void blink_led(int duration, int count) {
 	for (int i=0;i<count;i++) {
 		HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
@@ -110,7 +116,7 @@ void blink_led(int duration, int count) {
 		HAL_Delay(duration);
 	}
 }
-
+#endif
 
 /* Called every 10ms by TIM3 */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
@@ -156,7 +162,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 			uart_tx_buffer[5] = uart_rx_buffer[2];
 			uart_tx_buffer[6] = uart_rx_buffer[3];
 			uart_tx_buffer[7] = uart_tx_buffer[3] ^ uart_tx_buffer[4] ^ uart_tx_buffer[5] ^ uart_tx_buffer[6];
-			HAL_UART_Transmit(&huart1, uart_tx_buffer, 8, 100);
+			HAL_UART_Transmit_DMA(&huart1, uart_tx_buffer, 8);
 			uart_rx_buffer_len = 0;
 		}
 	}
@@ -181,7 +187,9 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 		uint8_t tx_bytes=0;
 		if (handle_command(&uart_rx_buffer[pos], uart_tx_buffer, 0, &tx_bytes )) {
 			if (tx_bytes) {
-				HAL_UART_Transmit(&huart1, uart_tx_buffer, tx_bytes, 100);
+				uart_tx_buffer[0] = 0x00;
+				uart_tx_buffer[1] = 0xff;
+				HAL_UART_Transmit_DMA(&huart1, uart_tx_buffer, tx_bytes);
 			}
 			uart_int=1;
 			pos += 6;
@@ -231,6 +239,14 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
 	    }
 }
 
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+	if (GPIO_Pin == HALL_1_OUT_Pin) {
+		  hall_sensor_callback(HALL_1_SENSOR, HAL_GPIO_ReadPin( HALL_1_OUT_GPIO_Port, HALL_1_OUT_Pin));
+	} else if (GPIO_Pin == HALL_2_OUT_Pin) {
+		  hall_sensor_callback(HALL_2_SENSOR, HAL_GPIO_ReadPin( HALL_2_OUT_GPIO_Port, HALL_2_OUT_Pin));
+	}
+}
+
 
 /* USER CODE END 0 */
 
@@ -241,6 +257,7 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
 int main(void)
 {
   /* USER CODE BEGIN 1 */
+  htim1.Instance = NULL;
 
   /* USER CODE END 1 */
 
@@ -276,6 +293,7 @@ int main(void)
   /* Unlock the Flash Program Erase controller */
   HAL_FLASH_Unlock();
 
+#ifndef SLIM_BINARY
   /* EEPROM Init */
   if (EE_Init() != HAL_OK) {
 	  // Initing FLASH failed! This should not happen! We will try to continue anyway by setting default values
@@ -283,6 +301,9 @@ int main(void)
   } else {
 	  motor_load_settings();
   }
+#else
+  motor_set_default_settings();
+#endif
 
   /* USER CODE END 2 */
 
@@ -302,7 +323,9 @@ int main(void)
 
   motor_init();
 
+#ifndef SLIM_BINARY
   blink_led(500,2);
+#endif
 
   while (1)
   {
@@ -312,7 +335,9 @@ int main(void)
 	if (uart_int) {
 		uart_int=0;
 
+#ifndef SLIM_BINARY
 		blink_led(50,1);
+#endif
 	}
 
 	motor_process();
@@ -636,13 +661,13 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin : HALL_1_OUT_Pin */
   GPIO_InitStruct.Pin = HALL_1_OUT_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(HALL_1_OUT_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : HALL_2_OUT_Pin */
   GPIO_InitStruct.Pin = HALL_2_OUT_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(HALL_2_OUT_GPIO_Port, &GPIO_InitStruct);
 

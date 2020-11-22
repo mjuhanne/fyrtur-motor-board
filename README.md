@@ -9,11 +9,11 @@
 This is a custom firmware for the TQL25-KT972 motor module (powered by the STM32F030K6T6 ARM microcontroller) used by IKEA Fyrtyr and Kadrilj roller blinds.
 
 It mimics the functionality of the original firmware with following enhancements:
- * **Allow setting custom motor speed**: The full speed with original FW is a bit too noisy for my ears, especially when used to control morning sunlight in the bedroom. Now it's possible to set the speed to 3 RPM and enjoy the (almost) silent operation, waking up to the sunlight instead of whirring noise :)
+ * **Allow setting custom motor speed**: The full speed with original FW is a bit too noisy for my ears and this can be a problem especially when blinds are used in bedroom to control the amount of morning sunlight. Now it's possible to set the speed to 3 RPM and enjoy the (almost) silent operation, waking up to the sunlight instead of whirring noise :)
  * **Allow the use of 5-6 volt DC source:** Original firmware was intended to be used with chargeable battery which was protected from under-voltage by ceasing operation when voltage drops below 6 VDC. Our custom firmware instead is intended to be used with [custom Fyrtyr Wifi Module](https://github.com/mjuhanne/fyrtur-esp) (plugged to DC adapter) so the low voltage limit for motor operation is ignored, mitigating the need to shop for the harder-to-get 6-7.5 volt adapters. The minimum operating voltage check can be enabled though if one wants to use this with the original Zigbee module with battery.
- * **Allow finer curtain position handling:** Original firmware has 1% granularity for the curtain position (0% - 100%). This translates to 1.5 cm resolution when using blinds with 1.5m tall window. It doesn't sound much, but when using sunlight-blocking curtain a lot of sunlight can seep between lower curtain and window board from a 0.5-1.5 cm gap. The custom firmware allows setting target position with sub-percent resolution so curtain can be lowered more accurately.
+ * **Allow finer curtain position handling:** Original firmware has 1% granularity for the curtain position (0% - 100%). This translates to 1.5 cm resolution when using blinds with 1.5m tall window. It doesn't sound much, but when using sunlight-blocking curtain a lot of sunlight can seep between lower curtain and window board from a 0.5-1.5 cm gap. The custom firmware allows setting target position with sub-percent resolution so the curtain can be lowered more accurately.
 
-Although the new firmware can be used with original Ikea Fyrtur wireless (Zigbee) module, most of its additional features can only be used with [ESP8266/ESP32 based module using WiFi and MQTT connectivity](https://github.com/mjuhanne/fyrtur-esp)
+Although the new firmware can be used with original Ikea Fyrtur wireless (Zigbee) module, most of its additional features can only be utilized with [ESP8266/ESP32 based module using WiFi and MQTT connectivity](https://github.com/mjuhanne/fyrtur-esp)
 
 ## Wiring and UART interface
 
@@ -23,12 +23,14 @@ The motor is connected with 4 wires (TX, RX, GND, VCC). TX and RX are UART lines
 
 **Note that disassembling the motor unit will most definitely void your warranty!**
 
-**Please first dump the original FW as below before proceeding to install custom firmware!**
+**Please first dump the original firmware (as described below) before proceeding to install custom FW!**
 
 **This software is provided "as is". Use with caution and at your own risk! (See LICENSE file for DISCLAIMER)**
 
 #### Software installation
-For compiling the sources, install [STM32CubeIde](https://www.st.com/en/development-tools/stm32cubeide.html) (I used version 1.4.2) Alternatively, you can use binaries found in bin/ folder.
+For compiling the sources, install [STM32CubeIDE](https://www.st.com/en/development-tools/stm32cubeide.html) (I used version 1.4.2) 
+
+Alternatively you can use binaries found in bin/ folder.
 
 #### Disassembly
 - Unscrew the 3 small screws on the plastic enclosure
@@ -39,18 +41,18 @@ For compiling the sources, install [STM32CubeIde](https://www.st.com/en/developm
 #### Debug/programming interface wiring
 
 To flash the motor unit firmware a STM programmer is needed (recommended one is [ST-Link V2](https://www.digikey.com/en/products/detail/stmicroelectronics/ST-LINK-V2/2214535) which can be had for about 20 EUR / 22 USD). 
-The programming mode that is used is Single-Wire Debug (SWD) instead of older JTAG standard. Solder 5 male Dupont wires to IO1 header as described below. The required wires are GND, RST, SWCLK, SWDIO, 3V3 (3V3 is the square pin hole).
+The programming mode that is used is Single-Wire Debug (SWD) instead of older JTAG standard. First solder 5 male Dupont wires to IO1 header as described below. The required wires are GND, RST, SWCLK, SWDIO, 3V3 (To help identifying the correct order, 3V3 is the square pin hole).
 
 ![Fyrtur motor module SWD wiring](images/Fyrtur-motor-SWD-wiring-1.jpg)
 
-Then route the wires via holes in the the motor housing. You also need to carve a second narrow hole on the plastic end cap to fit the wires through (not shown in the picture).
+Then route the wires via holes in the the motor housing. You also need to carve a second narrow hole on the plastic end cap to fit the wires coming through (not shown in the picture). Be careful when reattaching the aluminum tube so that the little aluminum tabs are pushed firmly down in the plastic trenches and are absolutely flush with the rest of the tube (even slightest protusion can create annoying sound from friction and cause uneven movement!)
 
 ![Fyrtur motor module SWD wiring](images/Fyrtur-motor-SWD-wiring-3.jpg)
 
 Attach SWD wires to the flat cable that came with the ST-Link.
 ![Fyrtur motor module SWD wiring #2](images/Fyrtur-motor-SWD-wiring-2.jpg)
 
-#### Firmware dumping with ST-Link V2:
+#### Firmware dumping Windows ST-LINK utility and ST-Link V2:
 
 - External power (>= 4.0V) is required via the motor 7.4V pin
 - Launch STM32 ST-LINK Utility
@@ -63,13 +65,56 @@ Attach SWD wires to the flat cable that came with the ST-Link.
 - You should see the firmware now displayed. Save it to a binary file and backup it.
 
 
-#### (Custom) firmware installation with ST-Link V2:
+#### (Custom) firmware installation with Windows ST-LINK utility and ST-Link V2:
  - proceed with steps described above
  - Click Target->Program & Verify
  - Select custom/original firmware file (.bin)
  - Make sure start address is 0x08000000
  - Skip Flash Erase and Skip Flash Protection verification can be set
  - Hit Start!
+
+#### Linux / MacOS X ST-Link
+
+There is also [Open Source ST-Link utility](https://github.com/stlink-org/stlink) available. It can be installed via HomeBrew on MacOS X (`brew install stlink`)
+
+Probing:
+```$ st-info --probe
+Found 1 stlink programmers
+ serial:     363f6b065250343857440343
+ hla-serial: "\x36\x3f\x6b\x06\x52\x50\x34\x38\x57\x44\x03\x43"
+ flash:      32768 (pagesize: 1024)
+ sram:       4096
+ chipid:     0x0444
+ descr:      F0xx small
+```
+
+Reading:
+```
+$ st-flash read original-fyrtur-fw.bin 0x8000000 32768
+st-flash 1.6.1
+2020-11-15T14:19:51 INFO common.c: F0xx small: 4 KiB SRAM, 32 KiB flash in at least 1 KiB pages.
+```
+
+Writing: 
+```
+$ st-flash write Release/fyrtur-motor-board.bin 0x8000000
+st-flash 1.6.1
+2020-11-15T14:17:14 INFO common.c: F0xx small: 4 KiB SRAM, 32 KiB flash in at least 1 KiB pages.
+file Release/fyrtur-motor-board.bin md5 checksum: 37264f7467389a6709a3f3bdea35977, stlink checksum: 0x00183980
+2020-11-15T14:17:14 INFO common.c: Attempting to write 17768 (0x4568) bytes to stm32 address: 134217728 (0x8000000)
+2020-11-15T14:17:14 INFO common.c: Flash page at addr: 0x08000000 erased
+2020-11-15T14:17:14 INFO common.c: Flash page at addr: 0x08000400 erased
+...
+2020-11-15T14:17:14 INFO common.c: Flash page at addr: 0x08004400 erased
+2020-11-15T14:17:14 INFO common.c: Finished erasing 18 pages of 1024 (0x400) bytes
+2020-11-15T14:17:14 INFO common.c: Starting Flash write for VL/F0/F3/F1_XL core id
+2020-11-15T14:17:14 INFO flash_loader.c: Successfully loaded flash loader in sram
+ 18/18 pages written
+2020-11-15T14:17:15 INFO common.c: Starting verification of write complete
+2020-11-15T14:17:15 INFO common.c: Flash written and verified! jolly good!
+```
+
+If writing fails with `ERROR common.c: stlink_flash_loader_run(0x8000000) failed! == -1` try power-cycling the motor board and/or retry flashing.
 
 
 ## Motor board reverse engineering
@@ -139,7 +184,7 @@ The motor module response consists of 8 bytes and follows this pattern:
 
 #### Overriding move commands
 
-These commands can move the curtains past the maximum curtain length (see Position chapter below)
+These commands can move the curtains past the maximum (or full) curtain length (see Position chapter below)
 
 ##### CMD_UP_90
 `00 ff 9a fa d1 2b`
@@ -163,17 +208,16 @@ See Position chapter below for more information
 
 ##### CMD_SET_MAX_CURTAIN_LENGTH
 `00 ff 9a fa ee 14`
-- Sets the 'user defined' or 'logical' maximum curtain length (pos=100) to the current curtain position. This is supposed to be used to limit curtain movement past installation restrictions (e.g. window board or alcove).
+- Sets the 'user defined' or 'logical' maximum curtain length (pos=100) to the current curtain position. This is intended to be used to limit curtain movement past installation restrictions (e.g. window board or alcove).
 
 ##### CMD_SET_FULL_CURTAIN_LENGTH
 `00 ff 9a fa cc 36`
 - Sets the 'full' or 'factory defined' maximum curtain length (pos=100) to current curtain position. This is supposed to be the absolute maximum curtain length restricted by the physical curtain length (movement past this limit would cause the curtain to rewind in opposite direction)
-- Setting the full curtain length will set also the user defined length to the same value.
+- Setting the full curtain length will set also the user defined (maximum) length to the same value.
 
 ##### CMD_RESET_CURTAIN_LENGTH
 `00 ff 9a fa 00 fa`
-- Reset the 'user defined' max curtain length back to the factory defined 'full' length. Motor also loses its current position and must be reset by winding up the curtain until hard stop.
-
+- Reset the 'user defined' max curtain length back to the factory defined 'full' length. Motor also loses its current position and calibration procedure must be done (see 'Position Calibration' chapter below)
 
 #### Custom firmware commands
 
@@ -198,6 +242,11 @@ This means that this command can be used to change motor speed real time without
 - Set the minimum operating voltage to XX. This can be used to protect the battery from under voltage condition. If operating voltage is below this setting, UART interface will function normally but motor will not engage. 
 - Minimum voltage = XX/16
 - XX : 0x00 (Bypass voltage check. Default setting)
+
+##### CMD_EXT_SET_AUTO_CAL
+`00 ff 9a 60 XX CHECKSUM`
+- Automatically calibrate the curtain position at power-on (see Calibration chapter below)
+- Enabled = 0x01 (default setting), 0x00 (disabled)
 
 ##### CMD_EXT_GET_VERSION
 `00 ff 9a cc dc CHECKSUM`
@@ -228,52 +277,53 @@ The motor module response consists of 8 bytes and follows this pattern:
 
 ##### CMD_EXT_GET_LIMITS
 `00 ff 9a cc df CHECKSUM`
-- Get limits/resetting data
+- Get full/maximum curtain lengths and resetting byte
 
 The motor module response consists of 8 bytes and follows this pattern:
 
 `0x00 0xff 0xbb RESETTING MCL_1 MCL_2 FCL_1 FCL_2 CHECKSUM`
 - The first 3 bytes is the header
-- RESETTING (0=Normal operation, 1=In resetting mode. Position is always reported as 50)
+- RESETTING (0=Normal operation, 1=In resetting mode. Movement is uninhibited by any limits set by curtain lengths and position is always reported as 50)
 - MCL = Maximum Curtain Length = MCL_1 * 256 + MCL_2
 - FCL = Full Curtain Length = FCL_1 * 256 + FCL_2
 - CHECKSUM is a bitwise XOR of the (RESETTING,MCL_1,MCL_2,FCL_1,FCL_2) bytes. 
 
-## Curtain position
+## Curtain position and curtain length
 
 Normally the motor unit reports the curtain position (after CMD_GET_STATUS command) as percentage of maximum operating distance or curtain length (0 for upper limit and 100 for lower limit).
 If more accurate positioning is needed, use CMD_EXT_GET_STATUS command for sub-percent resolution.
 
-When first powered the motor doesn't know the curtain position and it begins rewinding the curtain upwards (in original FW. Customizable in our FW).
-During this time position byte stands at 50 (sometimes at 100 in the original firmware). Rewinding continues until sufficient resistance occurs (motor begins stalling). Now the motor assumes that 
-the curtain has been lifted to upmost position. Position is now reset to 0. This upper limit calibration is done also every time the curtain is rolled up until motor stalls.
-
 When lowering the curtain the motor automatically stops when either the maximum (user defined) or full (factory defined) curtain length has been reached. The default value for factory setting is 13 turns + 265 degrees.
 
-Curtain can raised above the high limit or lowered below the lower limit with overriding move commands. In this case the motor will keep track of its position with internal counters. 
+Curtain can be raised above the top limit or lowered below the lower limit with overriding move commands. In these cases the motor module will keep track of its position with internal counters. 
 It will however NOT announce the position in STATUS message, but instead the position is truncated between 0 and 100.
 
-Maximum curtain length can be shortened by using CMD_SET_MAX_CURTAIN_LENGTH / CMD_SET_FULL_CURTAIN_LENGTH commands. These will set the current curtain position to 100 and will restrict normal movements below this lower limit. Reported curtain position data is now scaled accordingly.
+## Configuring the curtain length
 
-Maximum (user defined) curtain length can be reset via CMD_RESET_CURTAIN_LENGTH command. This will cause motor to ignore the curtain position and allow uninhibited movement regardless of the user/factory defined curtain lengths.
-The 'user defined' maximum length is also reset to 'factory defined' full curtain length. Position will be reported as 50 regardless of motor movement until blinds are rolled up to hard stop (mechanical resistance), 
-after which motor considers the curtain to be in upmost position. Position now is set to be 0 and normal operation can continue as described above.
+The maximum and full curtain lengths can be changed by using CMD_SET_MAX_CURTAIN_LENGTH / CMD_SET_FULL_CURTAIN_LENGTH commands. These will set the current curtain position to 100 and will restrict normal movements below this lower limit. Reported curtain position data is now scaled accordingly.
 
-Difference between maximum (or 'user defined') and full (factory defined) curtain lengths is that the maximum (user defined) curtain length is supposed to be used to limit curtain movement past installation restrictions (e.g. window board or alcove), 
-whereas full (factory defined) is supposed to be the absolute maximum curtain length restricted by the actual physical curtain length (movement past this limit would cause the curtain to rewind in opposite direction).
+Maximum (user-defined) curtain length can be reset to full ('factory defined') length via CMD_RESET_CURTAIN_LENGTH command. This will cause motor to ignore the current curtain position and allow uninhibited movement regardless of the user/factory defined curtain lengths.
+Position will be reported as 50 regardless of motor movement until calibration procedure is complete (see Position calibration chapter below). Position is then reset to 0 and normal operation can continue as described above.
+
+Difference between maximum (or 'user-defined') and full (factory-set) curtain lengths is that the maximum curtain length is intended to be used to limit curtain movement past installation restrictions (e.g. window board or alcove), whereas full (factory defined) is supposed to be the absolute maximum curtain length restricted by the actual physical curtain length (movement past this limit would cause the curtain to rewind in opposite direction).
 The default full curtain length is measured in curtain rod rotations and has value of 13 turns + 265 degrees.
 
-The user defined curtain length can be set only between 0 and full length, whereas the full (factory defined) in unrestricted in this way. It is assumed that the full curtain length is programmed by manufacturer (or a distributor, such as Ikea in this case) to match the curtain length of the end product.
-Setting the full curtain length will set also the user defined length to the same value.
-In original firmware, the full curtain length setting is stored into EEPROM/FLASH. In addition to this, our custom firmware saves also the user defined max length to non-volatile memory.
-Since full curtain length cannot be restored to any default value via UART command, the only way to extend this limit further is to use overriding movement commands to lower the curtain to the desired position and then call CMD_SET_FULL_CURTAIN_LENGTH again.
+The user-defined curtain length can be set only between 0 and full length, whereas the full (factory-set) is unrestricted in this way. It is assumed that the full curtain length is programmed by manufacturer (or a distributor, such as Ikea in this case) to match the curtain length of the end product.
+Changing the full curtain length will also reset the user-defined length to the same value.
+In original firmware, the full curtain length setting is stored into EEPROM/FLASH. In addition to this, our custom firmware saves also the user-defined max length to non-volatile memory.
+Since the full curtain length cannot be set to or restored to any default value via UART command in the original firmware, the only way to extend this limit further is to use overriding movement commands to lower the curtain to the desired position and then call CMD_SET_FULL_CURTAIN_LENGTH again. In our custom firmware, it's also possible set the full length value programmatically by using CMD_SET_LOCATION followed by CMD_SET_FULL_CURTAIN_LENGTH. With CMD_EXT_OVERRIDE_DOWN command the user can also roll smoothly below the lower limit. 
+
+## Position calibration
+
+When the module is first powered up the curtain position is uncalibrated (position is set to full length). If auto-calibration is enabled (the default setting) the calibration is done automatically by rewinding the curtain upwards. During this time position byte stands at 50 (sometimes at 100 in the original firmware). Rewinding continues until sufficient resistance occurs and motor begins stalling. Now it is assumed that the curtain has been lifted to upmost position and position is now reset to 0. This top position calibration is done also every time the curtain is rolled up until motor stalls, as well as after the CMD_RESET_CURTAIN_LENGTH command (although in the latter case the movement itself has to be started by a separate command).
+
+Auto-calibration can be configured with CMD_EXT_SET_AUTO_CAL.
 
 ## Curtain position calibration in a nutshell
 
-- If motor module is powered up and doesn't know its position, it begins rolling up the curtain until motor stalls and its position is assumed to be 0 (see Position chapter above). The previously set maximum curtain length limit is now enforced. 
 - To set maximum curtain length, lower the curtain to suitable position and call CMD_SET_MAX_CURTAIN_LENGTH. Position is now reset to 100 and scaled accordingly when curtain is rewinded to other lengths
-- To adjust maximum curtain length, move to suitable position and call CMD_SET_MAX_CURTAIN_LENGTH again. If this desirable position is outside current max current length, we have to use the "Overriding" movement commands to roll the curtains past the current limit.
-- To reset the maximum curtain length, use CMD_RESET_CURTAIN_LENGTH command and roll up the curtain to upper hard stop (motor will stall). Now position is reset to 0 and max curtain length is replaced with the factory setting (full curtain length).
+- To adjust maximum curtain length, move to suitable position and call CMD_SET_MAX_CURTAIN_LENGTH again. If this desirable position is beyond the current maximum curtain length, we have to use the "Overriding" movement commands to roll the curtains past the current limit.
+- To reset the maximum curtain length to full length, use CMD_RESET_CURTAIN_LENGTH command and do the calibration procedure (roll up the curtain to upper hard stop until motor stalls). Now position is reset to 0. 
 - To adjust the full curtain length (factory setting), navigate to desired position with "Overriding" movement commands and call CMD_SET_FULL_CURTAIN_LENGTH. This will reset also the maximum (user defined) curtain length to the same value.
 
 ## Battery and Voltage bytes
