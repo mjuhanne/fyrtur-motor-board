@@ -39,16 +39,16 @@ uint8_t target_speed = 0; // target RPM
 uint8_t curr_pwm = 0;  // PWM setting
 
 /*
- * When doing calibration the curtain rod is rotated upwards to highest position until motor stalls. Then the motor is de-energized,
+ * When doing calibration the curtain rod is rotated upwards to highest position until motor stalls. The next phase is the endpoint calibration, when the motor is de-energized,
  * which causes the rod to rotate slightly downwards due to curtain tension. We must wait a bit before tension is released and curtain rod
  * is settled in order to correct for the downwards movement. After this time period the motor is considered to be in top position (location = 0)
  */
-uint32_t calibration_started_timestamp = 0;
+uint32_t endpoint_calibration_started_timestamp = 0;
 
 /*
- * When resetting the maximum curtain length we ignore our position and allow unrestricted movement until calibration procedure is done
+ * When calibrating we allow unrestricted movement until calibration procedure is done
  */
-uint8_t resetting = 0;
+uint8_t calibrating = 0;
 
 uint8_t auto_calibration; // If enabled, auto-calibration will roll up the blinds during power up in order to calibrate top curtain position. Enabled by default
 
@@ -80,7 +80,7 @@ motor_command command; // for deferring execution to main loop since we don't wa
 // for debugging
 int dir_error = 0;
 int sensor_ticks_while_stopped = 0;
-int sensor_ticks_while_calibrating = 0;
+int sensor_ticks_while_calibrating_endpoint = 0;
 uint32_t saved_hall_sensor_1_ticks = 0;	// how many hall sensor #1 ticks(signals) after movement
 uint32_t saved_hall_sensor_2_ticks = 0;	// how many hall sensor #2 ticks(signals) after movement
 
@@ -213,8 +213,8 @@ uint32_t position100_to_location( float position ) {
 
 
 float location_to_position100() {
-	if (resetting) {
-		// When resetting we ignore our position and return 50% instead
+	if (calibrating) {
+		// When calibrating we ignore our position and return 50% instead
 		return 50;
 	}
 	if (location < 0) {	// don't reveal positions higher than top position (should not happen if calibrated correctly)
@@ -240,10 +240,10 @@ int get_rpm() {
 
 /*
  * This function adjusts location when the curtain rod is rotated by motor AS WELL AS by passive movement.
- * Movement is ignored only during resetting the maximum length since we are rolling upwards against hard-stop (and to location 0) anyway.
+ * Movement is ignored only during calibrating since we are rolling upwards against hard-stop (and to location 0) anyway.
  */
 int process_location(motor_direction sensor_direction) {
-	if (!resetting) {
+	if (!calibrating) {
 		if (sensor_direction == Up) {
 			location--;
 			if (direction == Up) {
@@ -310,8 +310,8 @@ void hall_sensor_callback( uint8_t sensor, uint8_t value ) {
 	// save for debugging
 	if (status == Stopped) {
 		sensor_ticks_while_stopped++;
-	} else if (status == Calibrating) {
-		sensor_ticks_while_calibrating++;
+	} else if (status == CalibratingEndPoint) {
+		sensor_ticks_while_calibrating_endpoint++;
 	}
 
 
@@ -402,11 +402,11 @@ void motor_stall_check() {
 				}
 			}
 		}
-	} else if (status == Calibrating) {
-		if (HAL_GetTick() - calibration_started_timestamp > CALIBRATION_PERIOD) {
+	} else if (status == CalibratingEndPoint) {
+		if (HAL_GetTick() - endpoint_calibration_started_timestamp > ENDPOINT_CALIBRATION_PERIOD) {
 			// Calibration is done and we are at top position
 			status = Stopped;
-			resetting = 0;	// if we were resetting, it also is now complete. Limits will be enforced from now on
+			calibrating = 0;	// Limits will be enforced from now on
 			location = 0;
 		}
 	}
@@ -424,11 +424,12 @@ void motor_stopped() {
 
 		if (current_status == Moving)  {
 			if (current_direction == Up) {
-				// If motor has stalled abruptly, we assume that we have reached the top position.
-				status = Calibrating;
-				sensor_ticks_while_calibrating = 0;	// for debugging
+				// If motor has stalled abruptly, we assume that we have reached the top position. Now remaining is the endpoint calibration
+				// (adjusting for the backward movement because of curtain tension)
+				status = CalibratingEndPoint;
+				sensor_ticks_while_calibrating_endpoint = 0;	// for debugging
 				// now we wait until curtain rod stabilizes
-				calibration_started_timestamp = HAL_GetTick();
+				endpoint_calibration_started_timestamp = HAL_GetTick();
 			} else {
 				// motor should not stall when direction is down!
 				status = Error;
@@ -648,7 +649,7 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 			{
 				motor_write_setting(MAX_CURTAIN_LEN_EEPROM, full_curtain_length);
 				max_curtain_length = full_curtain_length;
-				resetting = 1;	// allow unrestricted movement
+				calibrating = 1;	// allow unrestricted movement until the end of calibration
 			}
 			break;
 		case CMD_EXT_OVERRIDE_DOWN:
@@ -677,7 +678,7 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 				tx_buffer[2] = 0xd2;
 				tx_buffer[3] = 0;
 				tx_buffer[4] = (uint8_t)dir_error;
-				tx_buffer[5] = (uint8_t)sensor_ticks_while_calibrating;
+				tx_buffer[5] = (uint8_t)sensor_ticks_while_calibrating_endpoint;
 				tx_buffer[6] = (uint8_t)sensor_ticks_while_stopped;
 				tx_buffer[7] = 0;
 				tx_buffer[8] = tx_buffer[3] ^ tx_buffer[4] ^ tx_buffer[5] ^ tx_buffer[6] ^ tx_buffer[7];
@@ -733,7 +734,7 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 				tx_buffer[0] = 0x00;
 				tx_buffer[1] = 0xff;
 				tx_buffer[2] = 0xdb;
-				tx_buffer[3] = resetting;
+				tx_buffer[3] = calibrating;
 				tx_buffer[4] = max_curtain_length >> 8;
 				tx_buffer[5] = max_curtain_length & 0xff;
 				tx_buffer[6] = full_curtain_length >> 8;
@@ -760,7 +761,7 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 				default_speed = cmd2;
 			}
 		} else if (cmd1 == CMD_GO_TO) {
-			if (!resetting) {
+			if (!calibrating) {
 				target_location = position100_to_location(cmd2);
 				if (target_location < location) {
 					command = MotorUp;
@@ -769,7 +770,7 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 				}
 			}
 		} else if ((cmd1 & 0xf0) == CMD_EXT_GO_TO) {
-			if (!resetting) {
+			if (!calibrating) {
 				uint16_t pos = ((cmd1 & 0x0f)<<8) + cmd2;
 				float pos2 = ((float)pos)/16;
 				target_location = position100_to_location(pos2);
@@ -783,7 +784,7 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 			// There is only room for 12 bits of data, so we have omitted 1 least-significant bit
 			uint16_t loc = (((cmd1 & 0x0f)<<8) + cmd2) << 1;
 			location = loc;
-			resetting = 0;
+			calibrating = 0;
 		} else if (cmd1 == CMD_EXT_SET_MINIMUM_VOLTAGE) {
 			motor_write_setting(MINIMUM_VOLTAGE_EEPROM, cmd2);
 			minimum_voltage = cmd2;
@@ -817,10 +818,10 @@ void motor_init() {
 	location = max_curtain_length; // assume we are at bottom position
 
 	if (auto_calibration) {
-		resetting = 1;
+		calibrating = 1;
 		command = MotorUp;
 	} else {
-		resetting = 0;
+		calibrating = 0;
 		command = NoCommand;
 	}
 }

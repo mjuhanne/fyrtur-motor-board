@@ -228,6 +228,10 @@ See Position chapter below for more information
   - POS = (X*256 + YZ) / 16
 - Checksum has to be calculated as with CMD_GO_TO.
 
+##### CMD_EXT_OVERRIDE_DOWN
+`00 ff 9a fa da 20`
+- Starts rolling the blinds down 5 turns or until CMD_STOP is called. This command will not respect max/full curtain length and can be used for example to fine-tune lower curtain length in conjunction by setting slower speed beforehands. The 5 turn limit here is just for safety.
+
 ##### CMD_EXT_SET_SPEED
 `00 ff 9a 20 XX CHECKSUM`
 - Set the motor speed to XX (in RPM). Normal values are between 1 and 25 RPM.In contrast to CMD_SET_DEFAULT SPEED, this will not be written to non-volatile memory which has limited write cycles. 
@@ -249,7 +253,7 @@ This means that this command can be used to change motor speed real time without
 - Enabled = 0x01 (default setting), 0x00 (disabled)
 
 ##### CMD_EXT_GET_VERSION
-`00 ff 9a cc dc CHECKSUM`
+`00 ff 9a cc dc 10`
 - Get firmware version
 
 The motor module response consists of 8 bytes and follows this pattern:
@@ -262,7 +266,7 @@ The motor module response consists of 8 bytes and follows this pattern:
 
 
 ##### CMD_EXT_GET_STATUS
-`00 ff 9a cc de CHECKSUM`
+`00 ff 9a cc de 12`
 - Get extended status bytes.
 
 The motor module response consists of 8 bytes and follows this pattern:
@@ -276,17 +280,17 @@ The motor module response consists of 8 bytes and follows this pattern:
  - CHECKSUM is a bitwise XOR of the (MODULE_STATUS,MOTOR_CURRENT,POSITION_DEC,POSITION_FRAC) bytes.
 
 ##### CMD_EXT_GET_LIMITS
-`00 ff 9a cc df CHECKSUM`
-- Get full/maximum curtain lengths and resetting byte
+`00 ff 9a cc df 13`
+- Get full/maximum curtain lengths and calibrating byte
 
 The motor module response consists of 8 bytes and follows this pattern:
 
-`0x00 0xff 0xbb RESETTING MCL_1 MCL_2 FCL_1 FCL_2 CHECKSUM`
+`0x00 0xff 0xbb CALIBRATING MCL_1 MCL_2 FCL_1 FCL_2 CHECKSUM`
 - The first 3 bytes is the header
-- RESETTING (0=Normal operation, 1=In resetting mode. Movement is uninhibited by any limits set by curtain lengths and position is always reported as 50)
+- CALIBRATING (0=Normal operation, 1=In calibration mode. Movement is uninhibited by any limits set by curtain lengths and position is always reported as 50. See Position calibration chapter below)
 - MCL = Maximum Curtain Length = MCL_1 * 256 + MCL_2
 - FCL = Full Curtain Length = FCL_1 * 256 + FCL_2
-- CHECKSUM is a bitwise XOR of the (RESETTING,MCL_1,MCL_2,FCL_1,FCL_2) bytes. 
+- CHECKSUM is a bitwise XOR of the (CALIBRATING,MCL_1,MCL_2,FCL_1,FCL_2) bytes. 
 
 ## Curtain position and curtain length
 
@@ -302,7 +306,7 @@ It will however NOT announce the position in STATUS message, but instead the pos
 
 The maximum and full curtain lengths can be changed by using CMD_SET_MAX_CURTAIN_LENGTH / CMD_SET_FULL_CURTAIN_LENGTH commands. These will set the current curtain position to 100 and will restrict normal movements below this lower limit. Reported curtain position data is now scaled accordingly.
 
-Maximum (user-defined) curtain length can be reset to full ('factory defined') length via CMD_RESET_CURTAIN_LENGTH command. This will cause motor to ignore the current curtain position and allow uninhibited movement regardless of the user/factory defined curtain lengths.
+Maximum (user-defined) curtain length can be reset to full ('factory defined') length via CMD_RESET_CURTAIN_LENGTH command. This will also start the calibration procedure, which causes motor to ignore the current curtain position and allow uninhibited movement regardless of the user/factory defined curtain lengths.
 Position will be reported as 50 regardless of motor movement until calibration procedure is complete (see Position calibration chapter below). Position is then reset to 0 and normal operation can continue as described above.
 
 Difference between maximum (or 'user-defined') and full (factory-set) curtain lengths is that the maximum curtain length is intended to be used to limit curtain movement past installation restrictions (e.g. window board or alcove), whereas full (factory defined) is supposed to be the absolute maximum curtain length restricted by the actual physical curtain length (movement past this limit would cause the curtain to rewind in opposite direction).
@@ -315,7 +319,7 @@ Since the full curtain length cannot be set to or restored to any default value 
 
 ## Position calibration
 
-When the module is first powered up the curtain position is uncalibrated (position is set to full length). If auto-calibration is enabled (the default setting) the calibration is done automatically by rewinding the curtain upwards. During this time position byte stands at 50 (sometimes at 100 in the original firmware). Rewinding continues until sufficient resistance occurs and motor begins stalling. Now it is assumed that the curtain has been lifted to upmost position and position is now reset to 0. This top position calibration is done also every time the curtain is rolled up until motor stalls, as well as after the CMD_RESET_CURTAIN_LENGTH command (although in the latter case the movement itself has to be started by a separate command).
+When the module is first powered up the curtain position is uncalibrated (position is set to full length). If auto-calibration is enabled (the default setting) the calibration is done automatically by rewinding the curtain upwards. During this time position byte stands at 50 (sometimes at 100 in the original firmware). Rewinding continues until sufficient resistance occurs and motor begins stalling. Now it is assumed that the curtain has been lifted to upmost position and position is now reset to 0. This position calibration is done also every time the curtain is rolled up until motor stalls, as well as after the CMD_RESET_CURTAIN_LENGTH command (although in the latter case the movement itself has to be started by a separate command).
 
 Auto-calibration can be configured with CMD_EXT_SET_AUTO_CAL.
 

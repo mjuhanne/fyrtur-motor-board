@@ -37,7 +37,7 @@
  * After the motor is stalled, we wait a bit for the curtain tension to release and the curtain rod to settle. After this period
  * motor is considered to be in top position (location = 0)
  */
-#define CALIBRATION_PERIOD 1000 // Milliseconds
+#define ENDPOINT_CALIBRATION_PERIOD 1000 // Milliseconds
 
 
 /*
@@ -51,7 +51,7 @@ typedef enum motor_status {
 	Stopped,
 	Moving,
 	Stopping,
-	Calibrating,
+	CalibratingEndPoint,
 	Error
 } motor_status;
 
