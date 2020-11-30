@@ -26,6 +26,8 @@ motor_direction direction;
 int32_t target_location = 0;
 int32_t location = 0;
 
+uint8_t orientation = DEFAULT_ORIENTATION;
+
 uint32_t full_curtain_length = DEFAULT_FULL_CURTAIN_LEN;
 uint32_t max_curtain_length;
 
@@ -119,6 +121,7 @@ uint32_t saved_hall_sensor_2_ticks = 0;	// how many hall sensor #2 ticks(signals
 #define CMD_EXT_SET_MINIMUM_VOLTAGE	0x40	// minimum voltage. Will be stored to flash memory
 #define CMD_EXT_SET_LOCATION		0x50	// location is the lower 4 bits of the 1st byte + 2nd byte (1 sign bit + 11 bits of integer part)
 #define CMD_EXT_SET_AUTO_CAL		0x60	// If enabled, auto-calibration will roll up the blinds during power up in order to calibrate top curtain position. Enabled by default
+#define CMD_EXT_SET_ORIENTATION		0x61	// Sets curtain orientation (affects motor direction). (0 = normal orientation, default. 1 = reverse)
 #define CMD_EXT_GO_TO_LOCATION		0x70	// Go to target location (measured in Hall sensor ticks)
 #define CMD_EXT_SET_SLOWDOWN_FACTOR 0x80	// Set slowdown factor
 #define CMD_EXT_SET_MIN_SLOWDOWN_SPEED 0x90	// Set minimum approach speed
@@ -139,11 +142,12 @@ typedef enum eeprom_var_t {
 	FULL_CURTAIN_LEN_EEPROM = 1,
 	MINIMUM_VOLTAGE_EEPROM = 2,
 	DEFAULT_SPEED_EEPROM = 3,
-	AUTO_CAL_EEPROM = 4
+	AUTO_CAL_EEPROM = 4,
+	ORIENTATION_EEPROM = 5
 } eeprom_var_t;
 
 /* Virtual address defined by the user: 0xFFFF value is prohibited */
-uint16_t VirtAddVarTab[NB_OF_VAR] = {0x5555, 0x6666, 0x7777, 0x8888, 0x9999};
+uint16_t VirtAddVarTab[NB_OF_VAR] = {0x5555, 0x6666, 0x7777, 0x8888, 0x9999, 0xAAAA};
 
 
 void motor_set_default_settings() {
@@ -188,6 +192,13 @@ void motor_load_settings() {
 		EE_WriteVariable(VirtAddVarTab[AUTO_CAL_EEPROM], tmp);
 	} else {
 		auto_calibration = tmp;
+	}
+	if (EE_ReadVariable(VirtAddVarTab[ORIENTATION_EEPROM], &tmp) != 0) {
+		orientation = DEFAULT_ORIENTATION;
+		tmp = orientation;
+		EE_WriteVariable(VirtAddVarTab[ORIENTATION_EEPROM], tmp);
+	} else {
+		orientation = tmp;
 	}
 }
 #endif
@@ -242,7 +253,7 @@ int get_rpm() {
  * This function adjusts location when the curtain rod is rotated by motor AS WELL AS by passive movement.
  * Movement is ignored only during calibrating since we are rolling upwards against hard-stop (and to location 0) anyway.
  */
-int process_location(motor_direction sensor_direction) {
+int process_sensor(motor_direction sensor_direction) {
 	if (!calibrating) {
 		if (sensor_direction == Up) {
 			location--;
@@ -265,7 +276,7 @@ int process_location(motor_direction sensor_direction) {
 		}
 
 		// If motor is rotating, slow it down when approaching the target location
-		if (direction != None) {
+		if ( (direction != None) && (target_location != -1) ) {
 			int distance_to_target = abs(target_location - location);
 			if (distance_to_target < target_speed * slowdown_factor /8) {
 				status = Stopping;
@@ -294,6 +305,7 @@ void hall_sensor_callback( uint8_t sensor, uint8_t value ) {
 	// Note that changing direction will "skip" 1 position:
 	// 	e.g. HALL2_HIGH -> HALL1_LOW -> stop and change direction -> HALL1_HIGH -> HALL2_LOW will translate to:
 	//	1, 2, (stop & change dir), 0, 3, ...
+	// Also note that if orientation == REVERSE_ORIENTATION, the movement direction is reversed
 	int new_rotor_position = sensor + (1-value)*2;
 
 	if (sensor == HALL_1_SENSOR) {
@@ -317,35 +329,46 @@ void hall_sensor_callback( uint8_t sensor, uint8_t value ) {
 
 	if (rotor_position != -1) {
 		int diff = (4 + new_rotor_position - rotor_position) & 0x3;
-		if (diff == 1) {
+		if ( ((diff == 1) && (orientation == NORMAL_ORIENTATION)) ||
+				 ((diff == 3) && (orientation == REVERSE_ORIENTATION)) ) {
 			// Sensor direction is UP
 
 			if (direction != Down) {
 				// Process Up movement while motor is rotating upwards or disengaged
-				process_location(Up);
+				process_sensor(Up);
 			} else if (direction == Down ) {
 				// Mismatched direction between sensor and motor.
 				dir_error++;
 			}
-		} else if (diff == 3) {
+		} else if ( ((diff == 3) && (orientation == NORMAL_ORIENTATION)) ||
+					 ((diff == 1) && (orientation == REVERSE_ORIENTATION)) ) {
 			// Sensor direction is DOWN
 
 			if (direction != Up) {
 				// Process Down movement while motor is rotating downwards or disengaged
-				process_location(Down);
+				process_sensor(Down);
 			} else if (direction == Up) {
 				// Mismatched direction between sensor and motor.
 				dir_error++;
 			}
 		} else {
-			// Change of direction
-			//process_location(direction);
+			// Change of direction. Don't need to adjust location(?)
+			//process_sensor(direction);
 		}
 	}
 
 	rotor_position = new_rotor_position;
 }
 
+void update_motor_pwm() {
+	if ( ((direction == Up) && (orientation == NORMAL_ORIENTATION)) ||
+			 ((direction == Down) && (orientation == REVERSE_ORIENTATION)) ) {
+		TIM1->CCR4 = curr_pwm;
+	} else if ( ((direction == Down) && (orientation == NORMAL_ORIENTATION)) ||
+			 ((direction == Up) && (orientation == REVERSE_ORIENTATION)) ) {
+		TIM1->CCR1 = curr_pwm;
+	}
+}
 
 /* Called every 10ms by TIM3 */
 void motor_adjust_rpm() {
@@ -356,10 +379,7 @@ void motor_adjust_rpm() {
 				curr_pwm++;
 				if (target_speed - speed > 2)	// additional acceleration if speed difference is greater
 					curr_pwm++;
-				if (direction == Up)
-					TIM1->CCR4 = curr_pwm;
-				else
-					TIM1->CCR1 = curr_pwm;
+				update_motor_pwm();
 			}
 		}
 
@@ -370,10 +390,7 @@ void motor_adjust_rpm() {
 					curr_pwm--;
 				if (speed - target_speed > 4)	// additional acceleration if speed difference is greater
 					curr_pwm--;
-				if (direction == Up)
-					TIM1->CCR4 = curr_pwm;
-				else
-					TIM1->CCR1 = curr_pwm;
+				update_motor_pwm();
 			}
 		}
 	}
@@ -489,11 +506,17 @@ void motor_up(uint8_t motor_speed) {
 
 	motor_start_common(motor_speed);
 
-	// turn on LOW2 PWM and HIGH1
-	pwm_start(LOW2_PWM_CHANNEL);
-	TIM1->CCR4 = INITIAL_PWM;
-	HAL_GPIO_WritePin(HIGH_1_GATE_GPIO_Port, HIGH_1_GATE_Pin, GPIO_PIN_SET);
 	direction = Up;
+	update_motor_pwm();
+	if (orientation == NORMAL_ORIENTATION) {
+		// turn on LOW2 PWM and HIGH1
+		pwm_start(LOW2_PWM_CHANNEL);
+		HAL_GPIO_WritePin(HIGH_1_GATE_GPIO_Port, HIGH_1_GATE_Pin, GPIO_PIN_SET);
+	} else {
+		// turn on LOW1 PWM and HIGH2
+		pwm_start(LOW1_PWM_CHANNEL);
+		HAL_GPIO_WritePin(HIGH_2_GATE_GPIO_Port, HIGH_2_GATE_Pin, GPIO_PIN_SET);
+	}
 
 }
 
@@ -501,11 +524,17 @@ void motor_down(uint8_t motor_speed) {
 
 	motor_start_common(motor_speed);
 
-	// turn on LOW1 PWM and HIGH2
-	pwm_start(LOW1_PWM_CHANNEL);
-	TIM1->CCR1 = INITIAL_PWM;
-	HAL_GPIO_WritePin(HIGH_2_GATE_GPIO_Port, HIGH_2_GATE_Pin, GPIO_PIN_SET);
 	direction = Down;
+	update_motor_pwm();
+	if (orientation == NORMAL_ORIENTATION) {
+		// turn on LOW1 PWM and HIGH2
+		pwm_start(LOW1_PWM_CHANNEL);
+		HAL_GPIO_WritePin(HIGH_2_GATE_GPIO_Port, HIGH_2_GATE_Pin, GPIO_PIN_SET);
+	} else {
+		// turn on LOW2 PWM and HIGH1
+		pwm_start(LOW2_PWM_CHANNEL);
+		HAL_GPIO_WritePin(HIGH_1_GATE_GPIO_Port, HIGH_1_GATE_Pin, GPIO_PIN_SET);
+	}
 }
 
 
@@ -734,7 +763,7 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 				tx_buffer[0] = 0x00;
 				tx_buffer[1] = 0xff;
 				tx_buffer[2] = 0xdb;
-				tx_buffer[3] = calibrating;
+				tx_buffer[3] = calibrating | (orientation<<1);
 				tx_buffer[4] = max_curtain_length >> 8;
 				tx_buffer[5] = max_curtain_length & 0xff;
 				tx_buffer[6] = full_curtain_length >> 8;
@@ -791,6 +820,9 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 		} else if (cmd1 == CMD_EXT_SET_AUTO_CAL) {
 			motor_write_setting(AUTO_CAL_EEPROM, cmd2);
 			auto_calibration = cmd2;
+		} else if (cmd1 == CMD_EXT_SET_ORIENTATION) {
+			motor_write_setting(ORIENTATION_EEPROM, cmd2);
+			orientation = cmd2;
 		} else if ((cmd1 & 0xf0) == CMD_EXT_GO_TO_LOCATION) {
 			// There is only room for 12 bits of data, so we have omitted 1 least-significant bit
 			target_location = (((cmd1 & 0x0f)<<8) + cmd2) << 1;

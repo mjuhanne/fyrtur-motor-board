@@ -9,9 +9,12 @@
 #define SRC_MOTOR_H_
 
 #define VERSION_MAJOR 0
-#define VERSION_MINOR 76
+#define VERSION_MINOR 77
 
 #define GEAR_RATIO 171
+
+#define NORMAL_ORIENTATION	0	// Curtain is installed in normal ("back roll") configuration
+#define REVERSE_ORIENTATION	1	// Curtain is installed in reverse configuration (curtain rod is flipped to "front roll" configuration)
 
 // If != 0,  motor will be stopped if voltage drops below minimum voltage (in order to protect battery)
 #define DEFAULT_MINIMUM_VOLTAGE 0	// voltage check is bypassed
@@ -21,6 +24,8 @@
 #define DEFAULT_TARGET_SPEED 18	// RPM
 
 #define DEFAULT_AUTO_CAL_SETTING 1	// auto-calibration is enabled by default
+
+#define DEFAULT_ORIENTATION NORMAL_ORIENTATION
 
 /* If no hall sensor interrupts are received during this time period, assume motor is stopped/stalled */
 #define HALL_SENSOR_TIMEOUT 300 // Milliseconds.

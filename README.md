@@ -252,6 +252,11 @@ This means that this command can be used to change motor speed real time without
 - Automatically calibrate the curtain position at power-on (see Calibration chapter below)
 - Enabled = 0x01 (default setting), 0x00 (disabled)
 
+##### CMD_EXT_SET_ORIENTATION
+`00 ff 9a 61 XX CHECKSUM`
+- Sets the curtain rod orientation. Reversing the orientation changes motor and sensor direction.
+- Normal/"back roll" = 0 (default setting), 1 = reversed/"front roll"
+
 ##### CMD_EXT_GET_VERSION
 `00 ff 9a cc dc 10`
 - Get firmware version
@@ -263,7 +268,6 @@ The motor module response consists of 8 bytes and follows this pattern:
  - VERSION_MAJOR and VERSION_MINOR describe the firmware version (e.g. 0.7)
  - MINIMUM_VOLTAGE is the minimum operating voltage (see CMD_SET_MINIMUM_VOLTAGE)
  - CHECKSUM is a bitwise XOR of the (VERSION_MAJOR,VERSION_MINOR,MINIMUM_VOLTAGE) bytes.
-
 
 ##### CMD_EXT_GET_STATUS
 `00 ff 9a cc de 12`
@@ -329,6 +333,12 @@ Auto-calibration can be configured with CMD_EXT_SET_AUTO_CAL.
 - To adjust maximum curtain length, move to suitable position and call CMD_SET_MAX_CURTAIN_LENGTH again. If this desirable position is beyond the current maximum curtain length, we have to use the "Overriding" movement commands to roll the curtains past the current limit.
 - To reset the maximum curtain length to full length, use CMD_RESET_CURTAIN_LENGTH command and do the calibration procedure (roll up the curtain to upper hard stop until motor stalls). Now position is reset to 0. 
 - To adjust the full curtain length (factory setting), navigate to desired position with "Overriding" movement commands and call CMD_SET_FULL_CURTAIN_LENGTH. This will reset also the maximum (user defined) curtain length to the same value.
+
+
+## Changing the curtain rod orientation
+
+If you want to install the curtain rod backwards (a.k.a. "front roll") instead of the normal configuration ("back roll"), you can use CMD_EXT_SET_ORIENTATION command with "1" as parameter. The steps for doing this is to first roll up the blinds, then switch orientation with the command, followed by powering off and the actual physical flipping of the curtain rod.
+The order is important because normally auto calibration starts rolling blinds up after power on, but if the rod is reversed first, then the blinds start rolling in opposite direcion (i.e. down) without any limits..
 
 ## Battery and Voltage bytes
 
