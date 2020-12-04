@@ -1,8 +1,4 @@
-# IKEA Fyrtyr roller blind motor unit custom firmware
-
-**Table of Contents**
-
-[TOC]
+# IKEA Fyrtur roller blind motor unit custom firmware
 
 ## Introduction
 
@@ -10,7 +6,10 @@ This is a custom firmware for the TQL25-KT972 motor module (powered by the STM32
 
 It mimics the functionality of the original firmware with following enhancements:
  * **Allow setting custom motor speed**: The full speed with original FW is a bit too noisy for my ears and this can be a problem especially when blinds are used in bedroom to control the amount of morning sunlight. Now it's possible to set the speed to 3 RPM and enjoy the (almost) silent operation, waking up to the sunlight instead of whirring noise :)
- * **Allow the use of 5-6 volt DC source:** Original firmware was intended to be used with chargeable battery which was protected from under-voltage by ceasing operation when voltage drops below 6 VDC. Our custom firmware instead is intended to be used with [custom Fyrtyr Wifi Module](https://github.com/mjuhanne/fyrtur-esp) (plugged to DC adapter) so the low voltage limit for motor operation is ignored, mitigating the need to shop for the harder-to-get 6-7.5 volt adapters. The minimum operating voltage check can be enabled though if one wants to use this with the original Zigbee module with battery.
+ * **Allow the use of "front roll" configuration (curtain rod flipped 180 degrees) to give 2-3cm space between window and the blinds.
+ * **Enable the use of 5-6 volt DC source:** Original firmware was intended to be used with chargeable battery which was protected from under-voltage by ceasing operation when voltage drops below 6 VDC. Our custom firmware instead is intended to be used with [ESP Fyrtur Wifi Module](https://github.com/mjuhanne/fyrtur-esp) (plugged to DC adapter) so the low voltage limit for motor operation is ignored, mitigating the need to shop for the harder-to-get 6-7.5 volt adapters. The minimum operating voltage check can be enabled though if one wants to use this with the original Zigbee module with battery.
+ * **Smoother movement.** The blinds accelerate and decelerate more smoothly than with original FW
+ * **More stable position handling.** Original firmware starts losing its position gradually if it isn't calibrated every now and then by rolling the blinds to up-most position. This custom firmware retains its position much better in the long run.
  * **Allow finer curtain position handling:** Original firmware has 1% granularity for the curtain position (0% - 100%). This translates to 1.5 cm resolution when using blinds with 1.5m tall window. It doesn't sound much, but when using sunlight-blocking curtain a lot of sunlight can seep between lower curtain and window board from a 0.5-1.5 cm gap. The custom firmware allows setting target position with sub-percent resolution so the curtain can be lowered more accurately.
 
 Although the new firmware can be used with original Ikea Fyrtur wireless (Zigbee) module, most of its additional features can only be utilized with [ESP8266/ESP32 based module using WiFi and MQTT connectivity](https://github.com/mjuhanne/fyrtur-esp)
