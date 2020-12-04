@@ -40,7 +40,7 @@ Alternatively you can use binaries found in bin/ folder.
 #### Debug/programming interface wiring
 
 To flash the motor unit firmware a STM programmer is needed (recommended one is [ST-Link V2](https://www.digikey.com/en/products/detail/stmicroelectronics/ST-LINK-V2/2214535) which can be had for about 20 EUR / 22 USD). 
-The programming mode that is used is Single-Wire Debug (SWD) instead of older JTAG standard. First solder 5 male Dupont wires to IO1 header as described below. The required wires are GND, RST, SWCLK, SWDIO, 3V3 (To help identifying the correct order, 3V3 is the square pin hole).
+The programming mode that is used is Serial Wire Debug (SWD) instead of older JTAG standard. First solder 5 male Dupont wires to IO1 header as described below. The required wires are GND, RST, SWCLK, SWDIO, 3V3 (To help identifying the correct order, 3V3 is the square pin hole).
 
 ![Fyrtur motor module SWD wiring](images/Fyrtur-motor-SWD-wiring-1.jpg)
 
@@ -139,7 +139,7 @@ The first 3 bytes are the header, DATA1 and DATA2 are the command/argument bytes
 ##### CMD_UP
 `00 ff 9a 0a dd d7`
 - Starts rewinding the blinds up continously
-- This continues until CMD_STOP is used or resistance is met / motor is stalling. (See Position chapter below). Our custom firmware also stops when position 0 is reached (and before motor ends up stalling)
+- This continues until CMD_STOP is used or resistance is met / motor is stalling. (See Position chapter below). 
 
 ##### CMD_DOWN
 `00 ff 9a 0a ee e4`
@@ -148,7 +148,7 @@ The first 3 bytes are the header, DATA1 and DATA2 are the command/argument bytes
 ##### CMD_UP_17
 `00 ff 9a 0a 0d 07`
 - Rotates up the curtain rod 17 degrees (around 0.60cm). 
- - Note that in the original firmware this will for some reason convert to continous up movement (CMD_UP) if used when motor position is 0!
+ - Note that in the original firmware this will cause a continous up movement (CMD_UP) if used when motor position is 0!
  - In custom firmware curtains will not rewind beyond the upper limit however.
 
 ##### CMD_DOWN_17
