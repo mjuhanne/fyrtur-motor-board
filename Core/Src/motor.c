@@ -231,6 +231,9 @@ float location_to_position100() {
 	if (location < 0) {	// don't reveal positions higher than top position (should not happen if calibrated correctly)
 		return 0;
 	}
+	if  (status == CalibratingEndPoint) {
+		return 0;	// we don't publish the unstable position when doing top limit calibration
+	}
 	if (location > max_curtain_length) {
 		return 100;
 	}
@@ -239,13 +242,19 @@ float location_to_position100() {
 
 
 int get_rpm() {
+	int rpm = 0;
 	if (hall_sensor_1_interval) {
 		// 60000 ms in minute
 		// 2 hall sensor #1 interrupts per motor revolution
 		// GEAR_RATIO motor revolutions per curtain rod revolution
-		return 60*1000/GEAR_RATIO/hall_sensor_1_interval/2;
+		rpm = 60*1000/GEAR_RATIO/hall_sensor_1_interval/2;
 	}
-	return 0;
+	if ( (rpm == 0) && ( (status == Moving) || (status == Stopping) || (status == CalibratingEndPoint) )) {
+		// If speed is so slow that it's (almost) stalling or we in the middle of end-point calibration,
+		// report a minimal speed anyway so that controller module knows that we are not finished yet
+		rpm = 1;
+	}
+	return rpm;
 }
 
 
@@ -493,8 +502,14 @@ void motor_stop() {
 
 
 void motor_start_common(uint8_t motor_speed) {
-	motor_stop();	// first reset all the settings just in case..
-	HAL_Delay(10);
+	if (status == Moving) {
+		motor_stop();	// stop the motor and wait for the movement to stop
+		HAL_Delay(500);
+
+	} else {
+		motor_stop();	// first reset all the settings just in case..
+		HAL_Delay(10);
+	}
 	movement_started_timestamp = HAL_GetTick();
 
 	target_speed = motor_speed;
