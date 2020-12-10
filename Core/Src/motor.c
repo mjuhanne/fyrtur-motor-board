@@ -19,7 +19,7 @@ motor_direction direction;
  * calculated from LOCATION with location_to_position100 (and vice versa with position100_to_location).
  *
  * Maximum POSITION is affected by user-customizable max curtain length (configured via CMD_SET_MAX_CURTAIN_LENGTH). In addition to this,
- * there is the "absolute" limit of full (factory defined) curtain length. However these limits can be ignored using CMD_OVERRIDE_XXX commands and also be
+ * there is the "absolute" limit of full (factory defined) curtain length. However these limits can be ignored using CMD_OVERRIDE_XXX move commands and also be
  * re-configured with CMD_SET_MAX_CURTAIN_LENGTH / CMD_SET_FULL_CURTAIN_LENGTH commands.
  */
 #define DEG_TO_LOCATION(x) (GEAR_RATIO * 4 * x / 360)
@@ -39,6 +39,8 @@ uint16_t minimum_voltage;	// value is minimum voltage * 16 (float stored as inte
 uint8_t default_speed;
 uint8_t target_speed = 0; // target RPM
 uint8_t curr_pwm = 0;  // PWM setting
+
+uint16_t max_motor_current = DEFAULT_MAX_MOTOR_CURRENT;
 
 /*
  * When doing calibration the curtain rod is rotated upwards to highest position until motor stalls. The next phase is the endpoint calibration, when the motor is de-energized,
@@ -71,10 +73,14 @@ uint32_t hall_sensor_1_interval = 0; // how many milliseconds between Hall senso
  */
 uint32_t movement_started_timestamp = 0;
 
+uint16_t stall_detection_timeout = DEFAULT_STALL_DETECTION_TIMEOUT;
+
 int rotor_position = -1;
 
 uint8_t min_slowdown_speed = DEFAULT_MINIMUM_SLOWDOWN_SPEED;
 uint8_t	slowdown_factor = DEFAULT_SLOWDOWN_FACTOR;
+
+uint16_t stalling_current = 0;
 
 
 motor_command command; // for deferring execution to main loop since we don't want to invoke HAL_Delay in UARTinterrupt handler
@@ -107,6 +113,9 @@ uint32_t saved_hall_sensor_2_ticks = 0;	// how many hall sensor #2 ticks(signals
 #define CMD_SET_FULL_CURTAIN_LENGTH	0xfacc	// will be stored to flash memory
 #define CMD_RESET_CURTAIN_LENGTH	0xfa00	// reset maximum curtain length to factory setting (full curtain length). New value is stored to flash memory
 
+#define CMD_TOGGLE_ORIENTATION	0xd600	// Toggle blinds orientation between back-roll and front-roll
+#define CMD_RESET_ORIENTATION	0xd500	// Reset blinds orientation back to standard back-roll
+
 #define CMD_GET_STATUS 	0xcccc
 #define CMD_GET_STATUS2 0xcccd
 #define CMD_GET_STATUS3 0xccce
@@ -115,22 +124,25 @@ uint32_t saved_hall_sensor_2_ticks = 0;	// how many hall sensor #2 ticks(signals
 // ------ Commands supported only by our custom firmware -------
 
 // commands with 1 parameter
-#define CMD_EXT_GO_TO				0x10	// target position is the lower 4 bits of the 1st byte + 2nd byte (12 bits of granularity), where lower 4 bits is the decimal part
-#define CMD_EXT_SET_SPEED 			0x20	// setting speed via this command will not alter non-volatile memory (so it's safe for limited write-cycle flash memory)
-#define CMD_EXT_SET_DEFAULT_SPEED 	0x30	// default speed will be stored to flash memory
-#define CMD_EXT_SET_MINIMUM_VOLTAGE	0x40	// minimum voltage. Will be stored to flash memory
-#define CMD_EXT_SET_LOCATION		0x50	// location is the lower 4 bits of the 1st byte + 2nd byte (1 sign bit + 11 bits of integer part)
-#define CMD_EXT_SET_AUTO_CAL		0x60	// If enabled, auto-calibration will roll up the blinds during power up in order to calibrate top curtain position. Enabled by default
-#define CMD_EXT_SET_ORIENTATION		0x61	// Sets curtain orientation (affects motor direction). (0 = normal orientation, default. 1 = reverse)
-#define CMD_EXT_GO_TO_LOCATION		0x70	// Go to target location (measured in Hall sensor ticks)
-#define CMD_EXT_SET_SLOWDOWN_FACTOR 0x80	// Set slowdown factor
-#define CMD_EXT_SET_MIN_SLOWDOWN_SPEED 0x90	// Set minimum approach speed
+#define CMD_EXT_GO_TO					0x10	// target position is the lower 4 bits of the 1st byte + 2nd byte (12 bits of granularity), where lower 4 bits is the decimal part
+#define CMD_EXT_SET_SPEED 				0x20	// setting speed via this command will not alter non-volatile memory (so it's safe for limited write-cycle flash memory)
+#define CMD_EXT_SET_DEFAULT_SPEED 		0x30	// default speed will be stored to flash memory
+#define CMD_EXT_SET_MINIMUM_VOLTAGE		0x40	// minimum voltage. Will be stored to flash memory
+#define CMD_EXT_SET_LOCATION			0x50	// location is the lower 4 bits of the 1st byte + 2nd byte (1 sign bit + 11 bits of integer part)
+#define CMD_EXT_SET_AUTO_CAL			0x60	// If enabled, auto-calibration will roll up the blinds during power up in order to calibrate top curtain position. Enabled by default
+#define CMD_EXT_SET_ORIENTATION			0x61	// Sets curtain orientation (affects motor direction). (0 = normal orientation, default. 1 = reverse)
+#define CMD_EXT_SET_MAX_MOTOR_CURRENT 	0x62	// Set max motor current (current is 2nd byte * 8, measured in mA)
+#define CMD_EXT_SET_STALL_DETECTION_TIMEOUT 0x63	// Set hall sensor timeout (to detect motor stalling). (value is 2nd byte * 8, measured in milliseconds)
+#define CMD_EXT_GO_TO_LOCATION			0x70	// Go to target location (measured in Hall sensor ticks). Location is the lower 4 bits of the 1st byte + 2nd byte
+#define CMD_EXT_SET_SLOWDOWN_FACTOR 	0x80	// Set slowdown factor
+#define CMD_EXT_SET_MIN_SLOWDOWN_SPEED	0x90	// Set minimum approach speed
 
 // commands without parameter
 #define CMD_EXT_OVERRIDE_DOWN		0xfada	// Continous move down ignoring the max/full curtain length. Maximum movement of 5 revolutions per command
 #define CMD_EXT_GET_LOCATION 		0xccd0
 #define CMD_EXT_GET_VERSION 		0xccdc
 #define CMD_EXT_GET_STATUS 			0xccde
+#define CMD_EXT_GET_TUNING_PARAMS 	0xccd3
 #define CMD_EXT_GET_LIMITS 			0xccdf
 #define CMD_EXT_DEBUG	 			0xccd1
 #define CMD_EXT_SENSOR_DEBUG 		0xccd2
@@ -143,11 +155,13 @@ typedef enum eeprom_var_t {
 	MINIMUM_VOLTAGE_EEPROM = 2,
 	DEFAULT_SPEED_EEPROM = 3,
 	AUTO_CAL_EEPROM = 4,
-	ORIENTATION_EEPROM = 5
+	ORIENTATION_EEPROM = 5,
+	MAX_MOTOR_CURRENT_EEPROM = 6,
+	STALL_DETECTION_TIMEOUT_EEPROM = 7
 } eeprom_var_t;
 
 /* Virtual address defined by the user: 0xFFFF value is prohibited */
-uint16_t VirtAddVarTab[NB_OF_VAR] = {0x5555, 0x6666, 0x7777, 0x8888, 0x9999, 0xAAAA};
+uint16_t VirtAddVarTab[NB_OF_VAR] = {0x5555, 0x6666, 0x7777, 0x8888, 0x9999, 0xAAAA, 0xBBBB, 0xCCCC};
 
 
 void motor_set_default_settings() {
@@ -156,6 +170,9 @@ void motor_set_default_settings() {
 	minimum_voltage = DEFAULT_MINIMUM_VOLTAGE;
 	default_speed = DEFAULT_TARGET_SPEED;
 	auto_calibration = DEFAULT_AUTO_CAL_SETTING;
+	orientation = DEFAULT_ORIENTATION;
+	max_motor_current = DEFAULT_MAX_MOTOR_CURRENT;
+	stall_detection_timeout = DEFAULT_STALL_DETECTION_TIMEOUT;
 }
 
 #ifndef SLIM_BINARY
@@ -200,6 +217,20 @@ void motor_load_settings() {
 	} else {
 		orientation = tmp;
 	}
+	if (EE_ReadVariable(VirtAddVarTab[MAX_MOTOR_CURRENT_EEPROM], &tmp) != 0) {
+		max_motor_current = DEFAULT_MAX_MOTOR_CURRENT;
+		tmp = max_motor_current;
+		EE_WriteVariable(VirtAddVarTab[MAX_MOTOR_CURRENT_EEPROM], tmp);
+	} else {
+		max_motor_current = tmp;
+	}
+	if (EE_ReadVariable(VirtAddVarTab[STALL_DETECTION_TIMEOUT_EEPROM], &tmp) != 0) {
+		max_motor_current = DEFAULT_STALL_DETECTION_TIMEOUT;
+		tmp = stall_detection_timeout;
+		EE_WriteVariable(VirtAddVarTab[STALL_DETECTION_TIMEOUT_EEPROM], tmp);
+	} else {
+		stall_detection_timeout = tmp;
+	}
 }
 #endif
 
@@ -215,6 +246,7 @@ void motor_write_setting( eeprom_var_t var, uint16_t value ) {
 	}
 #endif
 }
+
 
 uint32_t position100_to_location( float position ) {
 	if (position > 100)
@@ -417,16 +449,19 @@ void motor_stall_check() {
 		if (HAL_GetTick() - movement_started_timestamp > HALL_SENSOR_GRACE_PERIOD) {
 			// enough time has passed since motor is energized -> apply stall detection
 
-			if (hall_sensor_1_idle_time > HALL_SENSOR_TIMEOUT) {
+			if (hall_sensor_1_idle_time > stall_detection_timeout) {
 				// motor has stalled/stopped
 
 				if ( (status == Stopping) && (hall_sensor_1_idle_time < HALL_SENSOR_TIMEOUT_WHILE_STOPPING) ) {
 					// when slowing down, allow longer time to recover from premature stalling
 				} else {
 					motor_stopped();
-					hall_sensor_1_idle_time = 0;
 				}
 			}
+		}
+		if (get_motor_current() > max_motor_current) {
+			// maximum current limit exceeded -> motor has stalled
+			motor_stopped();
 		}
 	} else if (status == CalibratingEndPoint) {
 		if (HAL_GetTick() - endpoint_calibration_started_timestamp > ENDPOINT_CALIBRATION_PERIOD) {
@@ -447,6 +482,8 @@ void motor_stopped() {
 
 		// De-energize the motor
 		motor_stop();
+
+		stalling_current = get_motor_current();
 
 		if (current_status == Moving)  {
 			if (current_direction == Up) {
@@ -577,11 +614,9 @@ void motor_process() {
 	}
 }
 
-#ifndef SLIM_BINARY
 uint8_t calculate_battery() {
 	return 0x12; // TODO
 }
-#endif
 
 
 uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstindex, uint8_t * tx_bytes) {
@@ -597,11 +632,7 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 		case CMD_GET_STATUS:
 			{
 				tx_buffer[2] = 0xd8;
-#ifndef SLIM_BINARY
 				tx_buffer[3] = calculate_battery();
-#else
-				tx_buffer[3] = 0x12;
-#endif
 				tx_buffer[4] = (uint8_t)( get_voltage()/16);  // returned value is voltage*30
 				tx_buffer[5] = (uint8_t)get_rpm();
 				tx_buffer[6] = location_to_position100();
@@ -696,6 +727,22 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 				calibrating = 1;	// allow unrestricted movement until the end of calibration
 			}
 			break;
+		case CMD_TOGGLE_ORIENTATION:
+			{
+				orientation = (orientation+1)&1;
+				motor_write_setting(ORIENTATION_EEPROM, orientation);
+				location = full_curtain_length - location;
+			}
+			break;
+		case CMD_RESET_ORIENTATION:
+			{
+				if (orientation == 1) {
+					orientation = 0;
+					motor_write_setting(ORIENTATION_EEPROM, orientation);
+					location = full_curtain_length - location;
+				}
+			}
+			break;
 		case CMD_EXT_OVERRIDE_DOWN:
 			{
 				target_location = location + DEG_TO_LOCATION(360*5);
@@ -704,8 +751,6 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 			break;
 		case CMD_EXT_GET_VERSION:
 			{
-				tx_buffer[0] = 0x00;
-				tx_buffer[1] = 0xff;
 				tx_buffer[2] = 0xd0;
 				tx_buffer[3] = VERSION_MAJOR;
 				tx_buffer[4] = VERSION_MINOR;
@@ -715,10 +760,24 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 				*tx_bytes=8;
 			}
 			break;
-			case CMD_EXT_DEBUG:
+		case CMD_EXT_GET_TUNING_PARAMS:
 			{
-				tx_buffer[0] = 0x00;
-				tx_buffer[1] = 0xff;
+				tx_buffer[2] = 0xd5;
+				tx_buffer[3] = slowdown_factor;
+				tx_buffer[4] = min_slowdown_speed;
+				tx_buffer[5] = stall_detection_timeout/8;
+				tx_buffer[6] = max_motor_current/8;
+				int16_t curr = stalling_current/8;
+				if (curr>255) {
+					curr = 255;
+				}
+				tx_buffer[7] = curr;
+				tx_buffer[8] = tx_buffer[3] ^ tx_buffer[4] ^ tx_buffer[5] ^ tx_buffer[6] ^ tx_buffer[7];
+				*tx_bytes=9;
+			}
+			break;
+		case CMD_EXT_DEBUG:
+			{
 				tx_buffer[2] = 0xd2;
 				tx_buffer[3] = 0;
 				tx_buffer[4] = (uint8_t)dir_error;
@@ -731,8 +790,6 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 			break;
 		case CMD_EXT_SENSOR_DEBUG:
 			{
-				tx_buffer[0] = 0x00;
-				tx_buffer[1] = 0xff;
 				tx_buffer[2] = 0xd3;
 				tx_buffer[3] = saved_hall_sensor_1_ticks >> 8;
 				tx_buffer[4] = saved_hall_sensor_1_ticks & 0xff;
@@ -759,11 +816,11 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 			{
 				tx_buffer[2] = 0xda;
 				tx_buffer[3] = status;
-#ifndef SLIM_BINARY
-				tx_buffer[4] = (uint8_t)(get_motor_current());
-#else
-				tx_buffer[4] = 0;
-#endif
+				uint16_t curr = get_motor_current() / 8;
+				if (curr > 255) {
+					curr = 255;	// maximum reported value is 2 amps
+				}
+				tx_buffer[4] = (uint8_t)curr;
 				tx_buffer[5] = (uint8_t)get_rpm();
 				float pos2 = location_to_position100() * 256;
 				int pos = pos2;
@@ -775,8 +832,6 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 			break;
 		case CMD_EXT_GET_LIMITS:
 			{
-				tx_buffer[0] = 0x00;
-				tx_buffer[1] = 0xff;
 				tx_buffer[2] = 0xdb;
 				tx_buffer[3] = calibrating | (orientation<<1);
 				tx_buffer[4] = max_curtain_length >> 8;
@@ -838,6 +893,14 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 		} else if (cmd1 == CMD_EXT_SET_ORIENTATION) {
 			motor_write_setting(ORIENTATION_EEPROM, cmd2);
 			orientation = cmd2;
+		} else if (cmd1 == CMD_EXT_SET_MAX_MOTOR_CURRENT) {
+			uint16_t curr = cmd2 * 8;
+			motor_write_setting(MAX_MOTOR_CURRENT_EEPROM, curr);
+			max_motor_current = curr;
+		} else if (cmd1 == CMD_EXT_SET_STALL_DETECTION_TIMEOUT) {
+			uint16_t timeout = cmd2 * 8;
+			motor_write_setting(STALL_DETECTION_TIMEOUT_EEPROM, timeout);
+			stall_detection_timeout = timeout;
 		} else if ((cmd1 & 0xf0) == CMD_EXT_GO_TO_LOCATION) {
 			// There is only room for 12 bits of data, so we have omitted 1 least-significant bit
 			target_location = (((cmd1 & 0x0f)<<8) + cmd2) << 1;

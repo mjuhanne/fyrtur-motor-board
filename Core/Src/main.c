@@ -33,7 +33,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define ADC_BUF_LEN 2*16
+#define ADC_BUF_LEN 2*32
 
 
 /* USER CODE END PD */
@@ -68,6 +68,8 @@ uint8_t uart_int;
 
 uint16_t adc_buf[ADC_BUF_LEN];
 
+uint16_t motor_current;
+
 
 /* USER CODE END PV */
 
@@ -86,15 +88,23 @@ static void MX_TIM3_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-uint32_t get_voltage() {
+// Calculate the average current of 32 previous measurements
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
+	uint32_t avg = 0;
+	for (int i=0;i<ADC_BUF_LEN/2;i++) {
+		avg += adc_buf[i*2+1] * 2;	// current in mA
+	}
+	avg /= ADC_BUF_LEN/2;
+	motor_current = avg;
+}
+
+uint16_t get_voltage() {
 	return adc_buf[0];	// values stored in adc_buf are voltages * 30 * 16;
 }
 
-#ifndef SLIM_BINARY
-uint32_t get_motor_current() {
-	return adc_buf[1];
+uint16_t get_motor_current() {
+	return motor_current;
 }
-#endif
 
 void pwm_start( uint32_t channel ) {
 	if (htim1.Instance != NULL)

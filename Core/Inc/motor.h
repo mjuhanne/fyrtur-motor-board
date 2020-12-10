@@ -9,7 +9,7 @@
 #define SRC_MOTOR_H_
 
 #define VERSION_MAJOR 0
-#define VERSION_MINOR 78
+#define VERSION_MINOR 79
 
 #define GEAR_RATIO 171
 
@@ -27,8 +27,10 @@
 
 #define DEFAULT_ORIENTATION NORMAL_ORIENTATION
 
+#define DEFAULT_MAX_MOTOR_CURRENT 1024 // mA
+
 /* If no hall sensor interrupts are received during this time period, assume motor is stopped/stalled */
-#define HALL_SENSOR_TIMEOUT 300 // Milliseconds.
+#define DEFAULT_STALL_DETECTION_TIMEOUT 296 // Milliseconds.
 
 /*
  * Allow slightly longer timeout when stopping

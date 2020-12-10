@@ -218,6 +218,19 @@ See Position chapter below for more information
 `00 ff 9a fa 00 fa`
 - Reset the 'user defined' max curtain length back to the factory defined 'full' length. Motor also loses its current position and calibration procedure must be done (see 'Position Calibration' chapter below)
 
+
+#### Commands involving curtain rod orientation
+
+##### CMD_TOGGLE_ORIENTATION 
+`00 ff 9a d6 00 d6`
+- Toggles between standard (back roll) and reversed (front roll) configuration. Reversing the orientation changes motor and sensor direction and flips location/position (e.g. from 20% to 80%). Setting will be written to EEPROM/FLASH.
+
+##### CMD_RESET_ORIENTATION 
+`00 ff 9a d5 00 d5`
+- Reset the orientation back to standard (back roll) if current orientation is front roll. Setting will be written to EEPROM/FLASH if changed. Nothing is done if configuration is already at back roll.
+
+
+
 #### Custom firmware commands
 
 ##### CMD_EXT_GO_TO
@@ -251,7 +264,7 @@ This means that this command can be used to change motor speed real time without
 - Automatically calibrate the curtain position at power-on (see Calibration chapter below)
 - Enabled = 0x01 (default setting), 0x00 (disabled)
 
-##### CMD_EXT_SET_ORIENTATION
+##### CMD_EXT_SET_ORIENTATION (deprecated, will be soon removed. Use CMD_TOGGLE_ORIENTATION or CMD_RESET_ORIENTATION instead
 `00 ff 9a 61 XX CHECKSUM`
 - Sets the curtain rod orientation. Reversing the orientation changes motor and sensor direction.
 - Normal/"back roll" = 0 (default setting), 1 = reversed/"front roll"

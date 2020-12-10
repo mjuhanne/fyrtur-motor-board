@@ -71,8 +71,8 @@ void motor_stopped();
 void motor_stall_check();
 void pwm_start(uint32_t channel);
 void pwm_stop(uint32_t channel);
-uint32_t get_voltage();
-uint32_t get_motor_current();
+uint16_t get_voltage();
+uint16_t get_motor_current();
 
 /* USER CODE END EFP */
 
@@ -108,7 +108,6 @@ uint32_t get_motor_current();
 
 #define LOW1_PWM_CHANNEL TIM_CHANNEL_1
 #define LOW2_PWM_CHANNEL TIM_CHANNEL_4
-
 
 #define UART_DMA_BUF_SIZE        64      /* DMA circular buffer size in bytes */
 #define DMA_TIMEOUT_MS      10      /* DMA Timeout duration in msec */
