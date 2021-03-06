@@ -23,9 +23,6 @@
 #ifndef __MAIN_H
 #define __MAIN_H
 
-// SLIM_BINARY disables few functionalities (mainly EEPROM code) so that the binary can be built with Debug mode. Normally keep this commented
-//#define SLIM_BINARY
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -109,7 +106,7 @@ uint16_t get_motor_current();
 #define LOW1_PWM_CHANNEL TIM_CHANNEL_1
 #define LOW2_PWM_CHANNEL TIM_CHANNEL_4
 
-#define UART_DMA_BUF_SIZE        64      /* DMA circular buffer size in bytes */
+#define UART_DMA_BUF_SIZE   64      /* DMA circular buffer size in bytes */
 #define DMA_TIMEOUT_MS      10      /* DMA Timeout duration in msec */
 
 /* USER CODE END Private defines */

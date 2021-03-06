@@ -7,6 +7,7 @@
 #include "main.h"
 #include "motor.h"
 #include "eeprom.h"
+#include "bootloader.h"
 
 motor_status status;
 motor_direction direction;
@@ -80,7 +81,7 @@ int rotor_position = -1;
 uint8_t min_slowdown_speed = DEFAULT_MINIMUM_SLOWDOWN_SPEED;
 uint8_t	slowdown_factor = DEFAULT_SLOWDOWN_FACTOR;
 
-uint16_t stalling_current = 0;
+uint16_t last_stalling_current = 0;
 
 
 motor_command command; // for deferring execution to main loop since we don't want to invoke HAL_Delay in UARTinterrupt handler
@@ -91,7 +92,6 @@ int sensor_ticks_while_stopped = 0;
 int sensor_ticks_while_calibrating_endpoint = 0;
 uint32_t saved_hall_sensor_1_ticks = 0;	// how many hall sensor #1 ticks(signals) after movement
 uint32_t saved_hall_sensor_2_ticks = 0;	// how many hall sensor #2 ticks(signals) after movement
-
 
 // ----- Commands supported also by original Fyrtur module -----
 
@@ -146,6 +146,7 @@ uint32_t saved_hall_sensor_2_ticks = 0;	// how many hall sensor #2 ticks(signals
 #define CMD_EXT_GET_LIMITS 			0xccdf
 #define CMD_EXT_DEBUG	 			0xccd1
 #define CMD_EXT_SENSOR_DEBUG 		0xccd2
+#define CMD_EXT_ENTER_BOOTLOADER	0xff00
 
 /****************** EEPROM variables ********************/
 
@@ -225,7 +226,7 @@ void motor_load_settings() {
 		max_motor_current = tmp;
 	}
 	if (EE_ReadVariable(VirtAddVarTab[STALL_DETECTION_TIMEOUT_EEPROM], &tmp) != 0) {
-		max_motor_current = DEFAULT_STALL_DETECTION_TIMEOUT;
+		stall_detection_timeout = DEFAULT_STALL_DETECTION_TIMEOUT;
 		tmp = stall_detection_timeout;
 		EE_WriteVariable(VirtAddVarTab[STALL_DETECTION_TIMEOUT_EEPROM], tmp);
 	} else {
@@ -446,7 +447,7 @@ void motor_stall_check() {
 		// Count how many milliseconds since previous HALL sensor interrupt
 		// in order to calculate RPM and detect motor stalling
 		hall_sensor_1_idle_time ++;
-		if (HAL_GetTick() - movement_started_timestamp > HALL_SENSOR_GRACE_PERIOD) {
+		if (HAL_GetTick() - movement_started_timestamp > HALL_SENSOR_TIMEOUT_WHILE_STARTING) {
 			// enough time has passed since motor is energized -> apply stall detection
 
 			if (hall_sensor_1_idle_time > stall_detection_timeout) {
@@ -483,7 +484,7 @@ void motor_stopped() {
 		// De-energize the motor
 		motor_stop();
 
-		stalling_current = get_motor_current();
+		last_stalling_current = get_motor_current();
 
 		if (current_status == Moving)  {
 			if (current_direction == Up) {
@@ -608,8 +609,13 @@ void motor_process() {
 	} else if (command == MotorDown) {
 		motor_down(default_speed);
 		command = NoCommand;
-	} else if(command == Stop) {
+	} else if (command == Stop) {
 		motor_stop();
+		command = NoCommand;
+	} else if( command == EnterBootloader) {
+		motor_stop();
+		reset_to_bootloader();
+		// .. not reached
 		command = NoCommand;
 	}
 }
@@ -767,7 +773,7 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 				tx_buffer[4] = min_slowdown_speed;
 				tx_buffer[5] = stall_detection_timeout/8;
 				tx_buffer[6] = max_motor_current/8;
-				int16_t curr = stalling_current/8;
+				int16_t curr = last_stalling_current/8;
 				if (curr>255) {
 					curr = 255;
 				}
@@ -811,7 +817,12 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstin
 				*tx_bytes=8;
 			}
 			break;
-
+		case CMD_EXT_ENTER_BOOTLOADER:
+			{
+				command = EnterBootloader;
+				status = Bootloader;
+			}
+			// fall-thru (send 'entering bootloader' status)
 		case CMD_EXT_GET_STATUS:
 			{
 				tx_buffer[2] = 0xda;

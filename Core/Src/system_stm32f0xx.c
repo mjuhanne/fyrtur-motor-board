@@ -64,6 +64,7 @@
   */
 
 #include "stm32f0xx.h"
+#include "bootloader.h"
 
 /**
   * @}
@@ -151,6 +152,7 @@ void SystemInit(void)
                          User can setups the default system clock (System clock source, PLL Multiplier
                          and Divider factors, AHB/APBx prescalers and Flash settings).
    */
+  check_bootloader();
 }
 
 /**

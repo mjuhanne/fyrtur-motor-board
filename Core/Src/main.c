@@ -70,7 +70,6 @@ uint16_t adc_buf[ADC_BUF_LEN];
 
 uint16_t motor_current;
 
-
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/

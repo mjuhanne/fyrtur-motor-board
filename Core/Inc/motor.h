@@ -9,7 +9,7 @@
 #define SRC_MOTOR_H_
 
 #define VERSION_MAJOR 0
-#define VERSION_MINOR 79
+#define VERSION_MINOR 80
 
 #define GEAR_RATIO 171
 
@@ -32,13 +32,14 @@
 /* If no hall sensor interrupts are received during this time period, assume motor is stopped/stalled */
 #define DEFAULT_STALL_DETECTION_TIMEOUT 296 // Milliseconds.
 
+/* If motor has been just energized, we will allow longer timeout period before stall detection is applied */
+#define HALL_SENSOR_TIMEOUT_WHILE_STARTING 1000 // Milliseconds
+
 /*
- * Allow slightly longer timeout when stopping
+ * Allow slightly longer timeout when stopping also
  */
 #define HALL_SENSOR_TIMEOUT_WHILE_STOPPING 1000 // Milliseconds.
 
-/* If motor has been just energized, we will allow longer timeout period before stall detection is applied */
-#define HALL_SENSOR_GRACE_PERIOD 1000 // Milliseconds
 
 /*
  * After the motor is stalled, we wait a bit for the curtain tension to release and the curtain rod to settle. After this period
@@ -59,6 +60,7 @@ typedef enum motor_status {
 	Moving,
 	Stopping,
 	CalibratingEndPoint,
+	Bootloader,
 	Error
 } motor_status;
 
@@ -72,7 +74,8 @@ typedef enum motor_command {
 	NoCommand,
 	MotorUp,
 	MotorDown,
-	Stop
+	Stop,
+	EnterBootloader
 } motor_command;
 
 uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstindex, uint8_t * tx_bytes);
