@@ -65,6 +65,7 @@ uint16_t uart_rx_buffer_len = 0;
 uint8_t uart_tx_buffer[16];
 
 uint8_t uart_int;
+uint8_t uart_tx_busy;
 
 uint16_t adc_buf[ADC_BUF_LEN];
 
@@ -131,9 +132,11 @@ void blink_led(int duration, int count) {
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 {
 	motor_adjust_rpm();
-
 }
 
+uint8_t uart_tx_done() {
+  return !uart_tx_busy;
+}
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
@@ -171,6 +174,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 			uart_tx_buffer[5] = uart_rx_buffer[2];
 			uart_tx_buffer[6] = uart_rx_buffer[3];
 			uart_tx_buffer[7] = uart_tx_buffer[3] ^ uart_tx_buffer[4] ^ uart_tx_buffer[5] ^ uart_tx_buffer[6];
+      uart_tx_busy = 1;
 			HAL_UART_Transmit_DMA(&huart1, uart_tx_buffer, 8);
 			uart_rx_buffer_len = 0;
 		}
@@ -198,6 +202,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 			if (tx_bytes) {
 				uart_tx_buffer[0] = 0x00;
 				uart_tx_buffer[1] = 0xff;
+        uart_tx_busy = 1;
 				HAL_UART_Transmit_DMA(&huart1, uart_tx_buffer, tx_bytes);
 			}
 			uart_int=1;
@@ -223,7 +228,10 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 	} else {
 		uart_rx_buffer_len = 0;
 	}
+}
 
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
+  uart_tx_busy = 0;
 }
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
@@ -267,6 +275,7 @@ int main(void)
 {
   /* USER CODE BEGIN 1 */
   htim1.Instance = NULL;
+  uart_tx_busy = 0;
 
   /* USER CODE END 1 */
 

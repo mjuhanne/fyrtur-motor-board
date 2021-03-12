@@ -70,6 +70,7 @@ void pwm_start(uint32_t channel);
 void pwm_stop(uint32_t channel);
 uint16_t get_voltage();
 uint16_t get_motor_current();
+uint8_t uart_tx_done();
 
 /* USER CODE END EFP */
 

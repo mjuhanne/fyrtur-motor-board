@@ -14,6 +14,8 @@ void check_bootloader() {
 void reset_to_bootloader() {
     jump_to_bootloader_magic = 0xDEADBEEF;
 
+    
+
     // Warning! If RESET PIN is connected with pull-up, hardware reset is needed because NVIC_SystemReset() will hang!
     NVIC_SystemReset();	
 }

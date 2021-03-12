@@ -8,6 +8,7 @@
 #include "motor.h"
 #include "eeprom.h"
 #include "bootloader.h"
+#include "stdlib.h" // abs function
 
 motor_status status;
 motor_direction direction;
@@ -82,7 +83,6 @@ uint8_t min_slowdown_speed = DEFAULT_MINIMUM_SLOWDOWN_SPEED;
 uint8_t	slowdown_factor = DEFAULT_SLOWDOWN_FACTOR;
 
 uint16_t last_stalling_current = 0;
-
 
 motor_command command; // for deferring execution to main loop since we don't want to invoke HAL_Delay in UARTinterrupt handler
 
@@ -428,9 +428,9 @@ void motor_adjust_rpm() {
 		if (speed > target_speed) {
 			if (curr_pwm > 1) {
 				curr_pwm--;
-				if (speed - target_speed > 2)	// additional acceleration if speed difference is greater
+				if (speed - target_speed > 2)	// additional deceleration if speed difference is greater
 					curr_pwm--;
-				if (speed - target_speed > 4)	// additional acceleration if speed difference is greater
+				if (speed - target_speed > 4)	// additional deceleration if speed difference is greater
 					curr_pwm--;
 				update_motor_pwm();
 			}
@@ -614,6 +614,9 @@ void motor_process() {
 		command = NoCommand;
 	} else if( command == EnterBootloader) {
 		motor_stop();
+		// Wait until all UART TX is done
+		while (!uart_tx_done()) {
+		}
 		reset_to_bootloader();
 		// .. not reached
 		command = NoCommand;

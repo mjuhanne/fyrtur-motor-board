@@ -9,7 +9,7 @@
 #define SRC_MOTOR_H_
 
 #define VERSION_MAJOR 0
-#define VERSION_MINOR 80
+#define VERSION_MINOR 81
 
 #define GEAR_RATIO 171
 
