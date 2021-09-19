@@ -9,7 +9,7 @@
 #define SRC_MOTOR_H_
 
 #define VERSION_MAJOR 0
-#define VERSION_MINOR 81
+#define VERSION_MINOR 82
 
 #define GEAR_RATIO 171
 
@@ -27,7 +27,14 @@
 
 #define DEFAULT_ORIENTATION NORMAL_ORIENTATION
 
+// The maximum amount of current that motor can draw while moving. Used for stall detection at the top position.
+// Note that this is upper limit is not enforced when starting the movement in order to break the static friction!
 #define DEFAULT_MAX_MOTOR_CURRENT 1024 // mA
+
+// We want at least this many sensor ticks to assume the motor is moving (and free of static friction). In reality
+// this should be lower number, but it can take few ticks before the measured current starts to drop even though static friction
+// has already been overcome. This is done because we don't want to erroneously think the motor is stalling 
+#define MIN_SENSOR_TICKS 8
 
 /* If no hall sensor interrupts are received during this time period, assume motor is stopped/stalled */
 #define DEFAULT_STALL_DETECTION_TIMEOUT 296 // Milliseconds.
@@ -54,31 +61,59 @@
 #define DEFAULT_MINIMUM_SLOWDOWN_SPEED 5
 #define DEFAULT_SLOWDOWN_FACTOR 48
 
+/*
+ * "Dance" is a series of movement steps (up or down) that the firmware uses to signal the user that it has acknowleged
+ * certain commands (such as CMD_SET_MAX_CURTAIN_LENGTH or CMD_SET_FULL_CURTAIN_LENGTH)
+ */
+#define DANCE_STEP_LENGTH 100	// length of one dance step (measured in Hall sensor ticks)
 
-typedef enum motor_status {
+
+/*
+ * Flexi-speed is a mechanism to change the motor speed setting even when using the custom firmware 
+ * with original Ikea Fyrtur Zigbee module. There are 4 different speed settings (3, 5, 15 and 25 RPM). User can
+ * cycle between them by repeatedly rolling the blinds up (CMD_UP command) 3 times. Firmware then selects the next speed 
+ * in the preset list and will signal the user by doing a little "down/up dance" curtain movement.
+ */
+
+/*
+ * The number of repeated CMD_UP commands before we cycle to next speed preset setting
+ */
+#define FLEXISPEED_TRIGGER_LIMIT 3
+
+
+
+
+typedef enum motor_status_t {
 	Stopped,
 	Moving,
 	Stopping,
 	CalibratingEndPoint,
 	Bootloader,
 	Error
-} motor_status;
+} motor_status_t;
 
-typedef enum motor_direction {
+typedef enum motor_error_t {
+	NoError = 0,
+	StalledMovingDown,
+	FrictionError
+} motor_error_t;
+
+typedef enum motor_direction_t {
 	None,
 	Up,
 	Down
-} motor_direction;
+} motor_direction_t;
 
-typedef enum motor_command {
+typedef enum motor_command_t {
 	NoCommand,
 	MotorUp,
 	MotorDown,
 	Stop,
-	EnterBootloader
-} motor_command;
+	EnterBootloader,
+	Dance,
+} motor_command_t;
 
-uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t burstindex, uint8_t * tx_bytes);
+uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t * tx_bytes);
 
 void motor_init();
 void motor_load_settings();

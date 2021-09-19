@@ -1,5 +1,9 @@
 #include "bootloader.h"
 
+#define SYSMEM_RESET_VECTOR             0x1FFFEC00
+#define JUMP_TO_BOOTLOADER_MAGIC_CODE   0xDEADBEEF
+
+// Variable declared to be located in section "noinit" so that its value will be retained even if CPU is reset
 __attribute__((section(".noinit"))) uint32_t jump_to_bootloader_magic;
 
 void check_bootloader() {
@@ -13,8 +17,6 @@ void check_bootloader() {
 
 void reset_to_bootloader() {
     jump_to_bootloader_magic = 0xDEADBEEF;
-
-    
 
     // Warning! If RESET PIN is connected with pull-up, hardware reset is needed because NVIC_SystemReset() will hang!
     NVIC_SystemReset();	

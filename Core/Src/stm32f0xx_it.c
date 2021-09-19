@@ -138,9 +138,11 @@ void SysTick_Handler(void)
   /* DMA timer */
   if(dma_uart_rx.timer == 1)
   {
-	  /* DMA Timeout event: set Timeout Flag and call DMA Rx Complete Callback */
-	  dma_uart_rx.flag = 1;
-	  hdma_usart1_rx.XferCpltCallback(&hdma_usart1_rx);
+    if (hdma_usart1_rx.XferCpltCallback) {
+      /* DMA Timeout event: set Timeout Flag and call DMA Rx Complete Callback */
+      dma_uart_rx.flag = 1;
+      hdma_usart1_rx.XferCpltCallback(&hdma_usart1_rx);
+    }
   }
   if(dma_uart_rx.timer) { --dma_uart_rx.timer; }
 
@@ -174,6 +176,13 @@ void EXTI0_1_IRQHandler(void)
 void EXTI4_15_IRQHandler(void)
 {
   /* USER CODE BEGIN EXTI4_15_IRQn 0 */
+  if(__HAL_GPIO_EXTI_GET_IT(GPIO_PIN_10) != 0x00u)
+  { 
+    __HAL_GPIO_EXTI_CLEAR_IT(GPIO_PIN_10);
+    // Ignore WAKEUP signal from UART1_RX in our IRQHandler. UART will still be enabled shortly
+    // and it will catch the message that woke up the CPU
+    return;
+  }
 
   /* USER CODE END EXTI4_15_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_7);

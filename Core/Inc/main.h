@@ -68,9 +68,15 @@ void motor_stopped();
 void motor_stall_check();
 void pwm_start(uint32_t channel);
 void pwm_stop(uint32_t channel);
-uint16_t get_voltage();
+uint16_t get_voltage(); // returned value is Volts * 30 * 16
 uint16_t get_motor_current();
 uint8_t uart_tx_done();
+
+void enter_sleep_mode();
+uint8_t sleep_timer_timeout();
+uint8_t sleep_timer_enabled();
+void disable_sleep_timer();
+void reset_sleep_timer();
 
 /* USER CODE END EFP */
 
@@ -109,6 +115,9 @@ uint8_t uart_tx_done();
 
 #define UART_DMA_BUF_SIZE   64      /* DMA circular buffer size in bytes */
 #define DMA_TIMEOUT_MS      10      /* DMA Timeout duration in msec */
+
+// If commented out, sleep mode is disabled. Debugging with sleep mode on is quite challenging..
+//#define IDLE_MODE_SLEEP_DELAY 3000 // Milliseconds. After this period of inactivity the sleep mode is entered
 
 /* USER CODE END Private defines */
 

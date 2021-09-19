@@ -64,12 +64,20 @@ uint8_t uart_rx_buffer[UART_DMA_BUF_SIZE]; // contains newly received data
 uint16_t uart_rx_buffer_len = 0;
 uint8_t uart_tx_buffer[16];
 
-uint8_t uart_int;
+uint8_t blink;
 uint8_t uart_tx_busy;
 
 uint16_t adc_buf[ADC_BUF_LEN];
 
 uint16_t motor_current;
+
+/* 
+ * Used to track when motor is idle and no commands have been issued. 
+ * After IDLE_MODE_SLEEP_DELAY milliseconds sleep mode is entered.
+ * If set to 0 then sleep mode is disabled temporarily (e.g. during movement and calibration)
+ */
+uint32_t idle_timestamp;
+
 
 /* USER CODE END PV */
 
@@ -138,6 +146,16 @@ uint8_t uart_tx_done() {
   return !uart_tx_busy;
 }
 
+void uart_start_rx_DMA() {
+  if(HAL_UART_Receive_DMA(&huart1, (uint8_t*)uart_dma_rx_buffer, UART_DMA_BUF_SIZE) != HAL_OK)
+      {
+          Error_Handler();
+      }
+  __HAL_DMA_DISABLE_IT(huart1.hdmarx, DMA_IT_HT);  // disable half-transfer interrupt
+  // Reset also the buffer pointer
+  dma_uart_rx.prevCNDTR = UART_DMA_BUF_SIZE;
+}
+
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
 	uint16_t i, pos, start, length;
@@ -198,14 +216,14 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 	uint16_t len = length;
 	while (len>=6) {
 		uint8_t tx_bytes=0;
-		if (handle_command(&uart_rx_buffer[pos], uart_tx_buffer, 0, &tx_bytes )) {
+		if (handle_command(&uart_rx_buffer[pos], uart_tx_buffer, &tx_bytes )) {
 			if (tx_bytes) {
 				uart_tx_buffer[0] = 0x00;
 				uart_tx_buffer[1] = 0xff;
         uart_tx_busy = 1;
 				HAL_UART_Transmit_DMA(&huart1, uart_tx_buffer, tx_bytes);
 			}
-			uart_int=1;
+//      blink += 1;
 			pos += 6;
 			len -= 6;
 		}
@@ -238,22 +256,17 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
 	//Error_Handler();
 
 	// Sometimes HAL_UART_ERROR_FE occurs on power on. Manage this..
+  __HAL_UART_CLEAR_OREFLAG(huart);
+  __HAL_UART_CLEAR_NEFLAG(huart);
+  __HAL_UART_CLEAR_FEFLAG(huart);
 
-	  __HAL_UART_CLEAR_OREFLAG(huart);
+  /* Disable the UART Error Interrupt: (Frame error, noise error, overrun error) */
+  __HAL_UART_DISABLE_IT(huart, UART_IT_ERR);
 
-	  __HAL_UART_CLEAR_NEFLAG(huart);
-
-	  __HAL_UART_CLEAR_FEFLAG(huart);
-	  /* Disable the UART Error Interrupt: (Frame error, noise error, overrun error) */
-
-	  __HAL_UART_DISABLE_IT(huart, UART_IT_ERR);
-
-	  if(huart->Instance == USART1) {
-	      //Restarting the RX DMA
-	  	  HAL_UART_Receive_DMA(&huart1, (uint8_t*)uart_dma_rx_buffer, UART_DMA_BUF_SIZE);
-	  	  // Reset also the buffer pointer
-	  	  dma_uart_rx.prevCNDTR = UART_DMA_BUF_SIZE;
-	    }
+  if(huart->Instance == USART1) {
+    // Restart the RX DMA
+    uart_start_rx_DMA();
+  }
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
@@ -262,6 +275,90 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	} else if (GPIO_Pin == HALL_2_OUT_Pin) {
 		  hall_sensor_callback(HALL_2_SENSOR, HAL_GPIO_ReadPin( HALL_2_OUT_GPIO_Port, HALL_2_OUT_Pin));
 	}
+}
+
+uint8_t sleep_timer_enabled() {
+	return (idle_timestamp != 0);
+}
+
+void disable_sleep_timer() {
+	idle_timestamp = 0; // disable sleep mode timer
+}
+
+void reset_sleep_timer() {
+	idle_timestamp = HAL_GetTick();
+}
+
+uint8_t sleep_timer_timeout() {
+#ifdef IDLE_MODE_SLEEP_DELAY
+  if (idle_timestamp == 0)
+    return 0;
+  if (HAL_GetTick() - idle_timestamp > IDLE_MODE_SLEEP_DELAY) 
+    return 1;
+#endif
+  return 0;
+}
+
+/*
+ * Original FW: Sleep mode current consumption 0.350 mA @ 7V (ST-Link connected)
+ * 
+ * This FW: 
+ *  run (normal mode): 13 mA
+ *  sleep mode: 1.7 mA (not used currently)
+ *  stop mode: 0.337 mA (ST-Link connected)
+ */
+void enter_sleep_mode() {
+
+  // Stop TIM3 (motor RPM adjust timer) and ADC
+  HAL_TIM_Base_Stop_IT(&htim3);
+  HAL_ADC_Stop_DMA(&hadc);
+
+  // Disable HALL sensors and voltage sensor (LM321 op amp)
+  HAL_GPIO_WritePin(PWR_EN_GPIO_Port, PWR_EN_Pin, GPIO_PIN_RESET);
+
+  blink_led(300,3);
+
+  // stop SysTick
+  HAL_SuspendTick();
+
+  // Deinitialize UART and use UART1_RX only for wake-up interrupt
+  HAL_UART_DeInit(&huart1);
+
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  GPIO_InitStruct.Pin = GPIO_PIN_10;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  // APB peripheral power interface clock needs to be enabled
+  __HAL_RCC_PWR_CLK_ENABLE();
+
+  // --- Go to sleep (Stop mode) ------
+  //HAL_PWR_EnterSLEEPMode(PWR_MAINREGULATOR_ON, PWR_SLEEPENTRY_WFE);
+  HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+
+  // ---- Now we are awake ---
+
+  // Is this needed?
+  // SystemClock_Config();
+
+  // Restart SysTick
+  HAL_ResumeTick();
+ 
+  MX_USART1_UART_Init();
+
+  uart_start_rx_DMA();
+
+  blink_led(300,3);
+
+  HAL_ADC_Start_DMA(&hadc, (uint32_t*)adc_buf, ADC_BUF_LEN);
+  __HAL_DMA_DISABLE_IT(hadc.DMA_Handle, DMA_IT_HT);  // disable half-transfer interrupt
+
+  HAL_TIM_Base_Start_IT(&htim3);
+
+  // Enable HALL sensors and voltage sensor (LM321 op amp)
+  HAL_GPIO_WritePin(PWR_EN_GPIO_Port, PWR_EN_Pin, GPIO_PIN_SET);
+
 }
 
 
@@ -328,16 +425,11 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
+  // Enable HALL sensors and voltage sensor (LM321 op amp)
   HAL_GPIO_WritePin(PWR_EN_GPIO_Port, PWR_EN_Pin, GPIO_PIN_SET);
 
-
-  //HAL_UART_Receive_IT (&huart1, uart_rx_buffer, 6);
-  if(HAL_UART_Receive_DMA(&huart1, (uint8_t*)uart_dma_rx_buffer, UART_DMA_BUF_SIZE) != HAL_OK)
-      {
-          Error_Handler();
-      }
-  __HAL_DMA_DISABLE_IT(huart1.hdmarx, DMA_IT_HT);  // disable half-transfer interrupt
-
+  // Start UART receiver in DMA mode
+  uart_start_rx_DMA();
 
   motor_init();
 
@@ -350,11 +442,12 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	if (uart_int) {
-		uart_int=0;
+	if (blink) {
+    uint8_t _blink = blink;
+    blink = 0;
 
 #ifndef SLIM_BINARY
-		blink_led(50,1);
+		blink_led(100,_blink);
 #endif
 	}
 
@@ -623,10 +716,7 @@ static void MX_USART1_UART_Init(void)
   /* USER CODE BEGIN USART1_Init 2 */
 
   /* UART1 IDLE Interrupt Configuration */
-   SET_BIT(USART1->CR1, USART_CR1_IDLEIE);
-
-   //HAL_NVIC_SetPriority(USART1_IRQn, 0, 0);
-   //HAL_NVIC_EnableIRQ(USART1_IRQn);
+  SET_BIT(USART1->CR1, USART_CR1_IDLEIE);
 
   /* USER CODE END USART1_Init 2 */
 
@@ -661,6 +751,7 @@ static void MX_GPIO_Init(void)
   GPIO_InitTypeDef GPIO_InitStruct = {0};
 
   /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
@@ -669,6 +760,20 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pins : PF0 PF1 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1;
+  GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : PA0 PA1 PA2 PA3
+                           PA15 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3
+                          |GPIO_PIN_15;
+  GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pins : HIGH_2_GATE_Pin HIGH_1_GATE_Pin PWR_EN_Pin */
   GPIO_InitStruct.Pin = HIGH_2_GATE_Pin|HIGH_1_GATE_Pin|PWR_EN_Pin;
@@ -688,6 +793,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(HALL_2_OUT_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : PB3 PB4 PB5 */
+  GPIO_InitStruct.Pin = GPIO_PIN_3|GPIO_PIN_4|GPIO_PIN_5;
+  GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pin : LED_Pin */
   GPIO_InitStruct.Pin = LED_Pin;
