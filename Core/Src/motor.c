@@ -92,7 +92,7 @@ motor_error_t last_error;
 
 // --- Flexi-speed parameters
 uint8_t flexispeed_sel = 0;	// selected setting 
-uint8_t flexispeed_settings[] = { 3, 5, 15, 25 };	// speed settings in RPM
+uint8_t flexispeed_settings[] = { 1, 3, 5, 15, 25 };	// speed settings in RPM
 // keeps track how many times CMD_UP is called repeatedly and if pastFLEXISPEED_TRIGGER_LIMIT, then cycle to next speed setting
 uint8_t flexispeed_trigger_counter;	
 uint16_t last_command; // the last command issued (except CMD_GET_STATUS)
