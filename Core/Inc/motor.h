@@ -9,7 +9,7 @@
 #define SRC_MOTOR_H_
 
 #define VERSION_MAJOR 0
-#define VERSION_MINOR 82
+#define VERSION_MINOR 83
 
 #define GEAR_RATIO 171
 
@@ -29,7 +29,7 @@
 
 // The maximum amount of current that motor can draw while moving. Used for stall detection at the top position.
 // Note that this is upper limit is not enforced when starting the movement in order to break the static friction!
-#define DEFAULT_MAX_MOTOR_CURRENT 1024 // mA
+#define DEFAULT_MAX_MOTOR_CURRENT 2048 // mA
 
 // We want at least this many sensor ticks to assume the motor is moving (and free of static friction). In reality
 // this should be lower number, but it can take few ticks before the measured current starts to drop even though static friction
