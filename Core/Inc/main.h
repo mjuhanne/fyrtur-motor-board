@@ -116,8 +116,11 @@ void reset_sleep_timer();
 #define UART_DMA_BUF_SIZE   64      /* DMA circular buffer size in bytes */
 #define DMA_TIMEOUT_MS      10      /* DMA Timeout duration in msec */
 
-// If commented out, sleep mode is disabled. Debugging with sleep mode on is quite challenging..
-//#define IDLE_MODE_SLEEP_DELAY 3000 // Milliseconds. After this period of inactivity the sleep mode is entered
+// If this is set to 0, sleep mode is disabled. Debugging with sleep mode on is quite challenging..
+#define DEFAULT_IDLE_MODE_SLEEP_DELAY 3000 // Milliseconds. After this period of inactivity the sleep mode is entered
+
+// For debugging.
+//#define BLINK_LEDS_WHEN_SLEEP_MODE_CHANGES
 
 /* USER CODE END Private defines */
 

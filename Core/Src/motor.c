@@ -36,6 +36,7 @@ uint32_t full_curtain_length = DEFAULT_FULL_CURTAIN_LEN;
 uint32_t max_curtain_length;
 
 uint16_t minimum_voltage;	// value is minimum voltage (in Volts) * 16 (float stored as interger value)
+uint32_t idle_mode_sleep_delay;
 
 /* the motor driver gate PWM duty cycle is initially 60/255 when first energized and then adjusted according to target_speed */
 #define INITIAL_PWM 60
@@ -140,8 +141,9 @@ int sensor_ticks_while_calibrating_endpoint = 0;
 #define CMD_EXT_SET_LOCATION			0x50	// location is the lower 4 bits of the 1st byte + 2nd byte (1 sign bit + 11 bits of integer part)
 #define CMD_EXT_SET_AUTO_CAL			0x60	// If enabled, auto-calibration will roll up the blinds during power up in order to calibrate top curtain position. Enabled by default
 #define CMD_EXT_SET_ORIENTATION			0x61	// Sets curtain orientation (affects motor direction). (0 = normal orientation, default. 1 = reverse)
-#define CMD_EXT_SET_MAX_MOTOR_CURRENT 	0x62	// Set max motor current (current is 2nd byte * 8, measured in mA)
+#define CMD_EXT_SET_MAX_MOTOR_CURRENT 	0x62	// Set max motor current (current is 2nd byte * 16, measured in mA. Maximum value is 0xff = 4A)
 #define CMD_EXT_SET_STALL_DETECTION_TIMEOUT 0x63	// Set hall sensor timeout (to detect motor stalling). (value is 2nd byte * 8, measured in milliseconds)
+#define CMD_EXT_SET_SLEEP_DELAY 		0x64	// The delay (in ms) after which sleep mode is entered when motor is idle. (value is 2nd byte * 256, measured in milliseconds. 0 = sleep mode is disabled)
 #define CMD_EXT_GO_TO_LOCATION			0x70	// Go to target location (measured in Hall sensor ticks). Location is the lower 4 bits of the 1st byte + 2nd byte
 #define CMD_EXT_SET_SLOWDOWN_FACTOR 	0x80	// Set slowdown factor
 #define CMD_EXT_SET_MIN_SLOWDOWN_SPEED	0x90	// Set minimum approach speed
@@ -189,11 +191,12 @@ typedef enum eeprom_var_t {
 	AUTO_CAL_EEPROM = 4,
 	ORIENTATION_EEPROM = 5,
 	MAX_MOTOR_CURRENT_EEPROM = 6,
-	STALL_DETECTION_TIMEOUT_EEPROM = 7
+	STALL_DETECTION_TIMEOUT_EEPROM = 7,
+	IDLE_MODE_SLEEP_DELAY_EEPROM = 8
 } eeprom_var_t;
 
 /* Virtual address defined by the user: 0xFFFF value is prohibited */
-uint16_t VirtAddVarTab[NB_OF_VAR] = {0x5555, 0x6666, 0x7777, 0x8888, 0x9999, 0xAAAA, 0xBBB0, 0xCCCC};
+uint16_t VirtAddVarTab[NB_OF_VAR] = {0x5555, 0x6666, 0x7777, 0x8888, 0x9999, 0xAAAA, 0xBBB0, 0xCCCC, 0xDDDD};
 
 
 void motor_set_default_settings() {
@@ -205,6 +208,7 @@ void motor_set_default_settings() {
 	orientation = DEFAULT_ORIENTATION;
 	max_motor_current = DEFAULT_MAX_MOTOR_CURRENT;
 	stall_detection_timeout = DEFAULT_STALL_DETECTION_TIMEOUT;
+	idle_mode_sleep_delay = DEFAULT_IDLE_MODE_SLEEP_DELAY;
 }
 
 #ifndef SLIM_BINARY
@@ -266,6 +270,13 @@ void motor_load_settings() {
 		EE_WriteVariable(VirtAddVarTab[STALL_DETECTION_TIMEOUT_EEPROM], tmp);
 	} else {
 		stall_detection_timeout = tmp;
+	}
+	if (EE_ReadVariable(VirtAddVarTab[IDLE_MODE_SLEEP_DELAY_EEPROM], &tmp) != 0) {
+		idle_mode_sleep_delay = DEFAULT_IDLE_MODE_SLEEP_DELAY;
+		tmp = idle_mode_sleep_delay;
+		EE_WriteVariable(VirtAddVarTab[IDLE_MODE_SLEEP_DELAY_EEPROM], tmp);
+	} else {
+		idle_mode_sleep_delay = tmp;
 	}
 }
 #endif
@@ -733,18 +744,18 @@ void motor_process() {
 		process_next_command(command);
 		command = NoCommand;
 	}
-#ifdef IDLE_MODE_SLEEP_DELAY
-	if ( (status == Stopped) || (status == Error) ) {
-		if (!sleep_timer_enabled()) {
-			reset_sleep_timer();
-		} else {
-			if (sleep_timer_timeout()) {
-				disable_sleep_timer();
-				enter_sleep_mode();
+	if (idle_mode_sleep_delay > 0) {
+		if ( (status == Stopped) || (status == Error) ) {
+			if (!sleep_timer_enabled()) {
+				reset_sleep_timer();
+			} else {
+				if (sleep_timer_timeout()) {
+					disable_sleep_timer();
+					enter_sleep_mode();
+				}
 			}
 		}
 	}
-#endif
 }
 
 #define VOLTAGE_TO_INT(x) (int)(x*30*16)
@@ -918,10 +929,10 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t * tx_by
 				tx_buffer[3] = slowdown_factor;
 				tx_buffer[4] = min_slowdown_speed;
 				tx_buffer[5] = stall_detection_timeout/8;
-				tx_buffer[6] = max_motor_current/8;
-				int16_t curr = last_stalling_current/8;
+				tx_buffer[6] = max_motor_current/16;
+				int16_t curr = last_stalling_current/16;
 				if (curr>255) {
-					curr = 255;
+					curr = 255; // maximum reported value is 4 amps
 				}
 				tx_buffer[7] = curr;
 				tx_buffer[8] = tx_buffer[3] ^ tx_buffer[4] ^ tx_buffer[5] ^ tx_buffer[6] ^ tx_buffer[7];
@@ -932,12 +943,12 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t * tx_by
 			{
 				tx_buffer[2] = 0xd2;
 				tx_buffer[3] = (uint8_t)last_error;
-				tx_buffer[4] = (uint8_t)dir_error;
+				tx_buffer[4] = (uint8_t)(idle_mode_sleep_delay/256);
 				tx_buffer[5] = (uint8_t)sensor_ticks_while_calibrating_endpoint;
 				tx_buffer[6] = (uint8_t)sensor_ticks_while_stopped;
-				uint16_t curr = highest_motor_current / 8;
+				uint16_t curr = highest_motor_current / 16;
 				if (curr > 255) {
-					curr = 255;	// maximum reported value is 2 amps
+					curr = 255;	// maximum reported value is 4 amps
 				}
 				tx_buffer[7] = curr;
 				tx_buffer[8] = tx_buffer[3] ^ tx_buffer[4] ^ tx_buffer[5] ^ tx_buffer[6] ^ tx_buffer[7];
@@ -977,9 +988,9 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t * tx_by
 			{
 				tx_buffer[2] = 0xda;
 				tx_buffer[3] = status;
-				uint16_t curr = get_motor_current() / 8;
+				uint16_t curr = get_motor_current() / 16;
 				if (curr > 255) {
-					curr = 255;	// maximum reported value is 2 amps
+					curr = 255;	// maximum reported value is 4 amps
 				}
 				tx_buffer[4] = (uint8_t)curr;
 				tx_buffer[5] = (uint8_t)get_rpm();
@@ -1056,13 +1067,17 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t * tx_by
 			motor_write_setting(ORIENTATION_EEPROM, cmd2);
 			orientation = cmd2;
 		} else if (cmd1 == CMD_EXT_SET_MAX_MOTOR_CURRENT) {
-			uint16_t curr = cmd2 * 8;
+			uint16_t curr = cmd2 * 16;
 			motor_write_setting(MAX_MOTOR_CURRENT_EEPROM, curr);
 			max_motor_current = curr;
 		} else if (cmd1 == CMD_EXT_SET_STALL_DETECTION_TIMEOUT) {
 			uint16_t timeout = cmd2 * 8;
 			motor_write_setting(STALL_DETECTION_TIMEOUT_EEPROM, timeout);
 			stall_detection_timeout = timeout;
+		} else if (cmd1 == CMD_EXT_SET_SLEEP_DELAY) {
+			uint16_t delay = cmd2 * 256;
+			motor_write_setting(IDLE_MODE_SLEEP_DELAY_EEPROM, delay);
+			idle_mode_sleep_delay = delay;
 		} else if ((cmd1 & 0xf0) == CMD_EXT_GO_TO_LOCATION) {
 			// There is only room for 12 bits of data, so we have omitted 1 least-significant bit
 			target_location = (((cmd1 & 0x0f)<<8) + cmd2) << 1;

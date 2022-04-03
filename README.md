@@ -27,7 +27,7 @@ subcontractor that manufactured the motor module) didn't bother to use the curre
 of these glitches.
 
 This makes me conclude that in order to avoid annoying false stall detection and position mismatches it should be safe to 
-disable the current sensing feature and to rely solely on the Hall sensor timeout (296 ms by default). After all, the current sensing is an extra feature not implemented originally by the manufacture. Needless to say, this kind of software feature, even if enabled, doesn't prevent from possible programming errors or physical catastrofic failures. This it's mandatory that other precautions are made to prevent too high current consumption in case of actual faulty operation.  Most (if not all) power adapters shut down the output if their maximum current draw is exceeded. The original Fyrtur board doesn't have any kind of fuse, but the Li-Ion battery modules are specified to have maximum 2A output. So I would like to assume that they have an internal current limiting / protection circuitry, BUT I HAVEN'T TESTED THEIR SAFETY WHEN SHORT CIRCUITED NOR DO I WANT TO!  
+disable the current sensing feature and to rely solely on the Hall sensor timeout (296 ms by default). After all, the current sensing is an extra feature not implemented originally by the manufacturer. Needless to say, this kind of software feature, even if enabled, doesn't prevent from possible programming errors or physical catastrofic failures. Thus it's mandatory that other precautions are made to prevent too high current consumption in case of actual faulty operation.  Most (if not all) power adapters shut down the output if their maximum current draw is exceeded. The original Fyrtur board doesn't have any kind of fuse, but the Li-Ion battery modules are specified to have maximum 2A output. So I would like to assume that they have an internal current limiting / protection circuitry, BUT I HAVEN'T TESTED THEIR SAFETY WHEN SHORT CIRCUITED NOR DO I WANT TO!  
 
 So, from version 0.83 and onwards the current sensing feature is disabled, but can be re-enabled if needed
 via CMD_EXT_SET_MAX_MOTOR_CURRENT command.
@@ -349,7 +349,7 @@ The motor module response consists of 8 bytes and follows this pattern:
 ##### CMD_EXT_SET_MAX_MOTOR_CURRENT
 `00 ff 9a 62 XX CHECKSUM`
 - Sets the maximum motor current to XX. Warning! This can cause glitches (see the section about current sensing functionality above). Disabled by default.
-- Maximum current (mA) = XX * 8
+- Maximum current (mA) = XX * 16
 - XX : 0x00 (Disable current sensing. Default setting)
 
 

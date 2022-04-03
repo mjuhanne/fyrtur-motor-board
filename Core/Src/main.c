@@ -54,6 +54,8 @@ UART_HandleTypeDef huart1;
 DMA_HandleTypeDef hdma_usart1_rx;
 DMA_HandleTypeDef hdma_usart1_tx;
 
+extern idle_mode_sleep_delay;
+
 /* USER CODE BEGIN PV */
 
 DMA_Event_t dma_uart_rx = {0,0,UART_DMA_BUF_SIZE};
@@ -290,12 +292,12 @@ void reset_sleep_timer() {
 }
 
 uint8_t sleep_timer_timeout() {
-#ifdef IDLE_MODE_SLEEP_DELAY
-  if (idle_timestamp == 0)
-    return 0;
-  if (HAL_GetTick() - idle_timestamp > IDLE_MODE_SLEEP_DELAY) 
-    return 1;
-#endif
+  if (idle_mode_sleep_delay > 0) {
+    if (idle_timestamp == 0)
+      return 0;
+    if (HAL_GetTick() - idle_timestamp > idle_mode_sleep_delay) 
+      return 1;
+  }
   return 0;
 }
 
@@ -316,7 +318,9 @@ void enter_sleep_mode() {
   // Disable HALL sensors and voltage sensor (LM321 op amp)
   HAL_GPIO_WritePin(PWR_EN_GPIO_Port, PWR_EN_Pin, GPIO_PIN_RESET);
 
-  blink_led(300,3);
+#ifdef BLINK_LEDS_WHEN_SLEEP_MODE_CHANGES
+  blink_led(100,3);
+#endif
 
   // stop SysTick
   HAL_SuspendTick();
@@ -349,7 +353,9 @@ void enter_sleep_mode() {
 
   uart_start_rx_DMA();
 
-  blink_led(300,3);
+#ifdef BLINK_LEDS_WHEN_SLEEP_MODE_CHANGES
+  blink_led(100,3);
+#endif
 
   HAL_ADC_Start_DMA(&hadc, (uint32_t*)adc_buf, ADC_BUF_LEN);
   __HAL_DMA_DISABLE_IT(hadc.DMA_Handle, DMA_IT_HT);  // disable half-transfer interrupt
