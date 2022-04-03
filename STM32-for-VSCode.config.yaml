@@ -1,0 +1,91 @@
+# Configuration file for the STM32 for VSCode extension
+# Arrays can be inputted in two ways. One is: [entry_1, entry_2, ..., entry_final]
+# or by adding an indented list below the variable name e.g.:
+# VARIABLE:
+# - entry_1
+# - entry_2
+
+# The project name
+target: fyrtur-motor-board
+# Can be C or C++
+language: C
+
+optimization: Og
+
+# MCU settings
+targetMCU: stm32f0x
+cpu: -mcpu=cortex-m0
+fpu: 
+floatAbi: 
+ldscript: STM32F030K6Tx_FLASH.ld # linker script
+
+# Compiler definitions. The -D prefix for the compiler will be automatically added.
+cDefinitions: 
+  - USE_HAL_DRIVER
+  - STM32F030x6
+
+cxxDefinitions: []
+asDefinitions: []
+
+# Compiler definition files. you can add a single files or an array of files for different definitions.
+# The file is expected to have a definition each new line.
+# This allows to include for example a .definition file which can be ignored in git and can contain
+# This can be convenient for passing along secrets at compile time, or generating a file for per device setup.
+cDefinitionsFile:
+cxxDefinitionsFile:
+asDefinitionsFile:
+
+# Compiler flags
+cFlags: []
+cxxFlags: []
+assemblyFlags: 
+  - -specs=nosys.specs
+
+
+# libraries to be included. The -l prefix to the library will be automatically added.
+# Mind that non standard libraries should have a path to their respective directory.
+libraries: 
+  - c
+  - m
+  - nosys
+
+libraryDirectories: []
+
+# Files or folders that will be excluded from compilation.
+# Glob patterns (https://www.wikiwand.com/en/Glob_(programming)) can be used.
+# Do mind that double stars are reserved in yaml
+# these should be escaped with a: \ or the name should be in double quotes e.g. "**.test.**"
+excludes: 
+  - "**/Examples/**"
+  - "**/examples/**"
+  - "**/Example/**"
+  - "**/example/**"
+  - "**_template.*"
+
+
+# Include directories (directories containing .h or .hpp files)
+# If a CubeMX makefile is present it will automatically include the include directories from that makefile.
+includeDirectories: 
+  - Inc/**
+  - Core/Inc/**
+  - Core/Lib/**
+  - Src/**
+  - Core/Src/**
+  - Core/Lib/**
+
+
+# Files that should be included in the compilation.
+# If a CubeMX makefile is present it will automatically include the  c and cpp/cxx files from that makefile.
+# Glob patterns (https://www.wikiwand.com/en/Glob_(programming)) can be used.
+# Do mind that double stars are reserved in yaml
+# these should be escaped with a: \ or the name should be in double quotes e.g. "HARDWARE_DRIVER*.c"
+sourceFiles:  
+  - Src/**
+  - Core/Src/**
+  - Core/Lib/**
+
+
+# When no makefile is present it will show a warning pop-up.
+# However when compilation without the CubeMX Makefile is desired, this can be turned of.
+suppressMakefileWarning: false
+    

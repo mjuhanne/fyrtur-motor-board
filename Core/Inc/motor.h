@@ -9,7 +9,7 @@
 #define SRC_MOTOR_H_
 
 #define VERSION_MAJOR 0
-#define VERSION_MINOR 82
+#define VERSION_MINOR 83
 
 #define GEAR_RATIO 171
 
@@ -22,14 +22,44 @@
 #define DEFAULT_FULL_CURTAIN_LEN GEAR_RATIO * (13 + 265.0/360) * 4
 
 #define DEFAULT_TARGET_SPEED 18	// RPM
+#define READ_DEFAULT_SPEED_FROM_EEPROM  // Reads default speed from EEPROM if it's stored there. Otherwise use the value above
 
 #define DEFAULT_AUTO_CAL_SETTING 1	// auto-calibration is enabled by default
 
 #define DEFAULT_ORIENTATION NORMAL_ORIENTATION
 
-// The maximum amount of current that motor can draw while moving. Used for stall detection at the top position.
-// Note that this is upper limit is not enforced when starting the movement in order to break the static friction!
-#define DEFAULT_MAX_MOTOR_CURRENT 1024 // mA
+/* 
+The DEFAULT_MAX_MOTOR_CURRENT is the maximum amount of current that motor can draw while moving. Used for stall detection 
+at the top position. Note that this is upper limit is not enforced when starting the movement in order to break the static friction!
+
+UPDATE 4/2022: 
+
+TLDR; This should be safe BUT DON'T COME AFTER ME WITH A LAWYER IF YOUR HOUSE BURNS DOWN :)
+
+Versions 0.82 (and earlier) have a predefined maximum motor current limit setting (1A default, configurable up to 2A).
+This software limit can cause annoyances on some motor units which have higher static and/or dynamic friction than anticipated. This causes inconsistently high power draw and thus the firmware makes false assumption that the motor is stalled 
+and the firmware then resets its known position to zero (upmost position) erroneously. When this position mismatch 
+occurs it's a recipe for disaster because when the user (or most likely the home automation system as scheduled) 
+tries to roll blinds down it causes movement further below the absolute lower limit, after which blinds start to move up 
+but in reverse orientation.
+This can create an annoying mess with wrinkled curtains and even damage the gluing between the curtains and the axel rod!
+
+This false stall detection behaviour has sometimes occured even after blinds have started to rotate a bit and they should be 
+free of static friction, so it's possible that abnormal current spikes might be detected by the current sensing circuitry 
+also after initial movement.
+
+The current limit feature in this firmware was designed to be an extra layer of safety in addition to the fuse on the custom (NOT ORIGINAL!) Fyrtur board. The main method of stall detection is via timeout of signals from the Hall sensors. 
+This is also the way the original firmware works as far as I know. In my reverse engineering project of the original Ikea motor firmware I didn't find any evidence that the current sensing circuitry would be used for stall detection (take this with a grain of salt - it's possible that I have overlooked this part of the code). So it seems that even Ikea (or the 
+subcontractor that manufactured the motor module) didn't bother to use the current sensing circuitry, possibly because
+of these glitches.
+
+This makes me conclude that in order to avoid annoying false stall detection and position mismatches it should be safe to 
+disable the current sensing feature and to rely solely on the Hall sensor timeout (296 ms by default). After all, the current sensing is an extra feature not implemented originally by the manufacture. Needless to say, this kind of software feature, even if enabled, doesn't prevent from possible programming errors or physical catastrofic failures. This it's mandatory that other precautions are made to prevent too high current consumption in case of actual faulty operation.  Most (if not all) power adapters shut down the output if their maximum current draw is exceeded. The original Fyrtur board doesn't have any kind of fuse, but the Li-Ion battery modules are specified to have maximum 2A output. So I would like to assume that they have an internal current limiting / protection circuitry, BUT I HAVEN'T TESTED THEIR SAFETY WHEN SHORT CIRCUITED NOR DO I WANT TO!  
+
+So, from version 0.83 and onwards the current sensing feature is disabled, but can be re-enabled if needed
+via CMD_EXT_SET_MAX_MOTOR_CURRENT command.
+*/
+#define DEFAULT_MAX_MOTOR_CURRENT 0 // in mA.  0 == DISABLED
 
 // We want at least this many sensor ticks to assume the motor is moving (and free of static friction). In reality
 // this should be lower number, but it can take few ticks before the measured current starts to drop even though static friction
@@ -74,6 +104,8 @@
  * cycle between them by repeatedly rolling the blinds up (CMD_UP command) 3 times. Firmware then selects the next speed 
  * in the preset list and will signal the user by doing a little "down/up dance" curtain movement.
  */
+// disabled by default
+//#define FLEXISPEED_ENABLED
 
 /*
  * The number of repeated CMD_UP commands before we cycle to next speed preset setting

@@ -193,7 +193,7 @@ typedef enum eeprom_var_t {
 } eeprom_var_t;
 
 /* Virtual address defined by the user: 0xFFFF value is prohibited */
-uint16_t VirtAddVarTab[NB_OF_VAR] = {0x5555, 0x6666, 0x7777, 0x8888, 0x9999, 0xAAAA, 0xBBBB, 0xCCCC};
+uint16_t VirtAddVarTab[NB_OF_VAR] = {0x5555, 0x6666, 0x7777, 0x8888, 0x9999, 0xAAAA, 0xBBB0, 0xCCCC};
 
 
 void motor_set_default_settings() {
@@ -229,12 +229,16 @@ void motor_load_settings() {
 	} else {
 		minimum_voltage = tmp;
 	}
+#ifdef READ_DEFAULT_SPEED_FROM_EEPROM
 	if (EE_ReadVariable(VirtAddVarTab[DEFAULT_SPEED_EEPROM], &tmp) != 0) {
 		tmp = default_speed = DEFAULT_TARGET_SPEED;
 		EE_WriteVariable(VirtAddVarTab[DEFAULT_SPEED_EEPROM], tmp);
 	} else {
 		default_speed = tmp;
 	}
+#else
+	default_speed = DEFAULT_TARGET_SPEED;
+#endif
 	if (EE_ReadVariable(VirtAddVarTab[AUTO_CAL_EEPROM], &tmp) != 0) {
 		auto_calibration = DEFAULT_AUTO_CAL_SETTING;
 		tmp = auto_calibration;
@@ -494,10 +498,12 @@ void motor_stall_check() {
 		if (curr > highest_motor_current) {
 			highest_motor_current = curr;
 		}
-		if ( (curr > max_motor_current) && (hall_sensor_1_ticks > MIN_SENSOR_TICKS) ) {
-			// maximum current limit exceeded while moving -> motor has stalled. Note that because static friction
-			// can be quite high, we do not enforce the current limit if motor hasn't turned yet (no Hall sensor signals received)
-			motor_stopped();
+		if (max_motor_current != 0) {
+			if ( (curr > max_motor_current) && (hall_sensor_1_ticks > MIN_SENSOR_TICKS) ) {
+				// maximum current limit exceeded while moving -> motor has stalled. Note that because static friction
+				// can be quite high, we do not enforce the current limit if motor hasn't turned yet (no Hall sensor signals received)
+				motor_stopped();
+			}
 		}
 	} else if (status == CalibratingEndPoint) {
 		if (HAL_GetTick() - endpoint_calibration_started_timestamp > ENDPOINT_CALIBRATION_PERIOD) {
@@ -699,6 +705,7 @@ void do_dance() {
 }
 
 uint8_t check_flexispeed_trigger() {
+#ifdef FLEXISPEED_ENABLED
 	if (last_command == CMD_UP) {
 		flexispeed_trigger_counter++;
 		if ( flexispeed_trigger_counter >= FLEXISPEED_TRIGGER_LIMIT -1) {
@@ -715,6 +722,7 @@ uint8_t check_flexispeed_trigger() {
 			return 1;
 		}
 	}
+#endif
 	return 0;
 }
 

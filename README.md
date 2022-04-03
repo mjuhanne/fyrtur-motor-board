@@ -4,7 +4,37 @@
 
 This is a custom firmware for the TQL25-KT972 motor module (powered by the STM32F030K6T6 ARM microcontroller) used by IKEA Fyrtyr and Kadrilj roller blinds.
 
-It mimics the functionality of the original firmware with following enhancements:
+
+## IMPORTANT INFORMATION ABOUT CURRENT SENSING FUNCTIONALITY
+
+TLDR; This should be safe BUT DON'T COME AFTER ME WITH A LAWYER IF YOUR HOUSE BURNS DOWN :)
+
+Versions 0.82 (and earlier) have a predefined maximum motor current limit setting (1A default, configurable up to 2A).
+This software limit can cause annoyances on some motor units which have higher static and/or dynamic friction than anticipated. This causes inconsistently high power draw and thus the firmware makes false assumption that the motor is stalled 
+and the firmware then resets its known position to zero (upmost position) erroneously. When this position mismatch 
+occurs it's a recipe for disaster because when the user (or most likely the home automation system as scheduled) 
+tries to roll blinds down it causes movement further below the absolute lower limit, after which blinds start to move up 
+but in reverse orientation.
+This can create an annoying mess with wrinkled curtains and even damage the gluing between the curtains and the axel rod!
+
+This false stall detection behaviour has sometimes occured even after blinds have started to rotate a bit and they should be 
+free of static friction, so it's possible that abnormal current spikes might be detected by the current sensing circuitry 
+also after initial movement.
+
+The current limit feature in this firmware was designed to be an extra layer of safety in addition to the fuse on the custom (NOT ORIGINAL!) Fyrtur board. The main method of stall detection is via timeout of signals from the Hall sensors. 
+This is also the way the original firmware works as far as I know. In my reverse engineering project of the original Ikea motor firmware I didn't find any evidence that the current sensing circuitry would be used for stall detection (take this with a grain of salt - it's possible that I have overlooked this part of the code). So it seems that even Ikea (or the 
+subcontractor that manufactured the motor module) didn't bother to use the current sensing circuitry, possibly because
+of these glitches.
+
+This makes me conclude that in order to avoid annoying false stall detection and position mismatches it should be safe to 
+disable the current sensing feature and to rely solely on the Hall sensor timeout (296 ms by default). After all, the current sensing is an extra feature not implemented originally by the manufacture. Needless to say, this kind of software feature, even if enabled, doesn't prevent from possible programming errors or physical catastrofic failures. This it's mandatory that other precautions are made to prevent too high current consumption in case of actual faulty operation.  Most (if not all) power adapters shut down the output if their maximum current draw is exceeded. The original Fyrtur board doesn't have any kind of fuse, but the Li-Ion battery modules are specified to have maximum 2A output. So I would like to assume that they have an internal current limiting / protection circuitry, BUT I HAVEN'T TESTED THEIR SAFETY WHEN SHORT CIRCUITED NOR DO I WANT TO!  
+
+So, from version 0.83 and onwards the current sensing feature is disabled, but can be re-enabled if needed
+via CMD_EXT_SET_MAX_MOTOR_CURRENT command.
+
+# Features
+
+The custom firmware mimics the functionality of the original firmware with following enhancements:
  * **Allow setting custom motor speed**: The full speed with original FW is a bit too noisy for my ears and this can be a problem especially when blinds are used in bedroom to control the amount of morning sunlight. Now it's possible to set the speed to 3 RPM and enjoy the (almost) silent operation, waking up to the sunlight instead of whirring noise :)
  * **Allow the use of "front roll" configuration** (curtain rod flipped 180 degrees) to give 2-3cm space between window and the blinds.
  * **Enable the use of 5-6 volt DC source:** Original firmware was intended to be used with chargeable battery which was protected from under-voltage by ceasing operation when voltage drops below 6 VDC. Our custom firmware instead is intended to be used with [ESP Fyrtur Wifi Module](https://github.com/mjuhanne/fyrtur-esp) (plugged to DC adapter) so the low voltage limit for motor operation is ignored, mitigating the need to shop for the harder-to-get 6-7.5 volt adapters. The minimum operating voltage check can be enabled though if one wants to use this with the original Zigbee module with battery.
@@ -28,7 +58,7 @@ The motor is connected with 4 wires (TX, RX, GND, VCC). TX and RX are UART lines
 **This software is provided "as is". Use with caution and at your own risk! (See LICENSE file for DISCLAIMER)**
 
 #### Software installation
-For compiling the sources, install [STM32CubeIDE](https://www.st.com/en/development-tools/stm32cubeide.html) (I used version 1.4.2) 
+For compiling the sources, install [STM32CubeIDE](https://www.st.com/en/development-tools/stm32cubeide.html) (I used version 1.4.2).  UPDATE: Currently I'm using Visual Studio Code and the "STM32 for VSCode" plugin.
 
 Alternatively you can use binaries found in bin/ folder.
 
@@ -315,6 +345,13 @@ The motor module response consists of 8 bytes and follows this pattern:
 ##### CMD_EXT_ENTER_BOOTLOADER
 `00 ff 9a ff 00 ff`
 - Enter the STM32 bootloader and get ready for firmware update. In order to exit the bootloader one needs to use special 'Go' bootloader command (used by ESP32 after firmware update), do hardware reset (impossible with UART interface) or do a power-cycle.
+
+##### CMD_EXT_SET_MAX_MOTOR_CURRENT
+`00 ff 9a 62 XX CHECKSUM`
+- Sets the maximum motor current to XX. Warning! This can cause glitches (see the section about current sensing functionality above). Disabled by default.
+- Maximum current (mA) = XX * 8
+- XX : 0x00 (Disable current sensing. Default setting)
+
 
 ## Curtain position and curtain length
 
