@@ -44,6 +44,14 @@ uint32_t idle_mode_sleep_delay;
 uint8_t default_speed;
 uint8_t target_speed = 0; // target RPM
 uint8_t curr_pwm = 0;  // PWM setting
+uint8_t pwm_when_stalled = 0; // for debugging
+
+/*
+* This flag is set when a new signal is received from Hall sensor and we can update the duty cycle.
+* Used only when slowing down
+* (speeding up must be done without waiting for this signal because otherwise we could end up stalling the motor prematurely)
+*/
+uint8_t rpm_updated = 0;
 
 uint16_t max_motor_current = DEFAULT_MAX_MOTOR_CURRENT;
 uint16_t highest_motor_current = 0;	// for statistics
@@ -94,7 +102,7 @@ motor_error_t last_error;
 // --- Flexi-speed parameters
 uint8_t flexispeed_sel = 0;	// selected setting 
 uint8_t flexispeed_settings[] = { 3, 5, 15, 25 };	// speed settings in RPM
-// keeps track how many times CMD_UP is called repeatedly and if pastFLEXISPEED_TRIGGER_LIMIT, then cycle to next speed setting
+// keeps track how many times CMD_UP is called repeatedly and if past FLEXISPEED_TRIGGER_LIMIT, then cycle to next speed setting
 uint8_t flexispeed_trigger_counter;	
 uint16_t last_command; // the last command issued (except CMD_GET_STATUS)
 
@@ -196,7 +204,7 @@ typedef enum eeprom_var_t {
 } eeprom_var_t;
 
 /* Virtual address defined by the user: 0xFFFF value is prohibited */
-uint16_t VirtAddVarTab[NB_OF_VAR] = {0x5555, 0x6666, 0x7777, 0x8888, 0x9999, 0xAAAA, 0xBBB0, 0xCCCC, 0xDDDD};
+uint16_t VirtAddVarTab[NB_OF_VAR] = {0x5555, 0x6666, 0x7777, 0x8888, 0x9999, 0xAAAA, 0xBBB1, 0xCCCC, 0xDDDD};
 
 
 void motor_set_default_settings() {
@@ -319,18 +327,13 @@ float location_to_position100() {
 }
 
 
-int get_rpm() {
-	int rpm = 0;
+float get_rpm() {
+	float rpm = 0;
 	if (hall_sensor_1_interval) {
 		// 60000 ms in minute
 		// 2 hall sensor #1 interrupts per motor revolution
 		// GEAR_RATIO motor revolutions per curtain rod revolution
-		rpm = 60*1000/GEAR_RATIO/hall_sensor_1_interval/2;
-	}
-	if ( (rpm == 0) && ( (status == Moving) || (status == Stopping) || (status == CalibratingEndPoint) )) {
-		// If speed is so slow that it's (almost) stalling or we in the middle of end-point calibration,
-		// report a minimal speed anyway so that controller module knows that we are not finished yet
-		rpm = 1;
+		rpm = 60*1000.0/GEAR_RATIO/hall_sensor_1_interval/2;
 	}
 	return rpm;
 }
@@ -400,6 +403,7 @@ void hall_sensor_callback( uint8_t sensor, uint8_t value ) {
 		if (hall_sensor_1_ticks > 1) {
 			// At least two sensor ticks are needed to calculate interval correctly
 			hall_sensor_1_interval = hall_sensor_1_idle_time;	// update time passed between hall sensor interrupts
+			rpm_updated = 1;
 		}
 		hall_sensor_1_idle_time = 0;
 	} else {
@@ -460,7 +464,7 @@ void update_motor_pwm() {
 /* Called every 10ms by TIM3 */
 void motor_adjust_rpm() {
 	if ((status == Moving) || (status == Stopping)) {
-		uint32_t speed = get_rpm();
+		float speed = get_rpm();
 		if (speed < target_speed) {
 			if (curr_pwm < 254) {
 				curr_pwm++;
@@ -470,14 +474,18 @@ void motor_adjust_rpm() {
 			}
 		}
 
-		if (speed > target_speed) {
-			if (curr_pwm > 1) {
-				curr_pwm--;
-				if (speed - target_speed > 2)	// additional deceleration if speed difference is greater
+		// Lower RPM only if new tick from Hall sensor has been received
+		if (rpm_updated) {
+			if (speed > target_speed) {
+				rpm_updated = 0;
+				if (curr_pwm > 1) {
 					curr_pwm--;
-				if (speed - target_speed > 4)	// additional deceleration if speed difference is greater
-					curr_pwm--;
-				update_motor_pwm();
+					if (speed - target_speed > 2)	// additional deceleration if speed difference is greater
+						curr_pwm--;
+					if (speed - target_speed > 4)	// additional deceleration if speed difference is greater
+						curr_pwm--;
+					update_motor_pwm();
+				}
 			}
 		}
 	}
@@ -532,6 +540,8 @@ void motor_stopped() {
 
 		motor_status_t current_status = status;
 		motor_direction_t current_direction = direction;
+		uint16_t motor_current = get_motor_current();
+		pwm_when_stalled = curr_pwm;
 
 		// De-energize the motor
 		motor_stop();
@@ -540,14 +550,27 @@ void motor_stopped() {
 
 		if (current_status == Moving)  {
 			if (hall_sensor_1_ticks > MIN_SENSOR_TICKS) {
+
 				if (current_direction == Up) {
-					// If motor has stalled abruptly, we assume that we have reached the top position. Now remaining is the endpoint calibration
-					// (adjusting for the backward movement because of curtain tension)
-					status = CalibratingEndPoint;
-					sensor_ticks_while_calibrating_endpoint = 0;	// for debugging
-					blink += 2;
-					// now we wait until curtain rod stabilizes				
-					endpoint_calibration_started_timestamp = HAL_GetTick();
+					if (motor_current > MINIMUM_CALIBRATION_CURRENT) {
+						// The motor has stalled with enough resistance (motor current) so we assume that we have reached 
+						// the top position. Now remaining is the endpoint calibration
+						// (adjusting for the backward movement because of curtain tension)
+						status = CalibratingEndPoint;
+						sensor_ticks_while_calibrating_endpoint = 0;	// for debugging
+						blink += 2;
+						// now we wait until curtain rod stabilizes				
+						endpoint_calibration_started_timestamp = HAL_GetTick();
+					} else {
+						// The motor has stalled but without too much resistance (motor current is low)
+						// This suggests that during low speed (usually RPM < 5) movement there was sudden increase in friction
+						// which caused the motor to stall. However the RPM adjustment function didn't respond quickly
+						// enough to ramp up the PWM duty cycle before Hall sensor timeout kicked in. 
+						// See MINIMUM_CALIBRATION_CURRENT definition
+						last_error = StalledMovingUp;
+						status = Error;
+						blink += 4;
+					}
 				} else {
 					// motor should not stall when direction is down!
 					last_error = StalledMovingDown;
@@ -793,7 +816,13 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t * tx_by
 				tx_buffer[2] = 0xd8;
 				tx_buffer[3] = calculate_battery();
 				tx_buffer[4] = (uint8_t)( get_voltage()/16);  // returned value in the message is Volts * 30 as in original FW
-				tx_buffer[5] = (uint8_t)get_rpm();
+				float rpm = get_rpm();
+				if ( (rpm < 1) && ( (status == Moving) || (status == Stopping) || (status == CalibratingEndPoint) )) {
+					// If speed is so slow that it's (almost) stalling or we in the middle of end-point calibration,
+					// report a minimal speed anyway so that controller module knows that we are not finished yet
+					rpm = 1;
+				}
+				tx_buffer[5] = (uint8_t)rpm;
 				tx_buffer[6] = location_to_position100();
 				tx_buffer[7] = tx_buffer[3] ^ tx_buffer[4] ^ tx_buffer[5] ^ tx_buffer[6];
 				*tx_bytes=8;
@@ -962,7 +991,7 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t * tx_by
 				tx_buffer[4] = hall_sensor_1_ticks & 0xff;
 				tx_buffer[5] = hall_sensor_2_ticks >> 8;
 				tx_buffer[6] = hall_sensor_2_ticks & 0xff;
-				tx_buffer[7] = 0;
+				tx_buffer[7] = pwm_when_stalled;
 				tx_buffer[8] = tx_buffer[3] ^ tx_buffer[4] ^ tx_buffer[5] ^ tx_buffer[6] ^ tx_buffer[7];
 				*tx_bytes=9;
 			}
@@ -988,18 +1017,25 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t * tx_by
 			{
 				tx_buffer[2] = 0xda;
 				tx_buffer[3] = status;
-				uint16_t curr = get_motor_current() / 16;
+				uint16_t curr = get_motor_current();
+				if ( (curr > 0) && (curr < 16)) {
+					// return at least the minimum (16 mA) if non-zero
+					curr = 1;
+				} else {
+					curr /= 16;
+				}
 				if (curr > 255) {
 					curr = 255;	// maximum reported value is 4 amps
 				}
 				tx_buffer[4] = (uint8_t)curr;
-				tx_buffer[5] = (uint8_t)get_rpm();
+				tx_buffer[5] = (uint8_t)(get_rpm()*4); // extended speed is with 2 bits of floating point precision
 				float pos2 = location_to_position100() * 256;
 				int pos = pos2;
 				tx_buffer[6] = pos >> 8;
 				tx_buffer[7] = pos & 0xff;
-				tx_buffer[8] = tx_buffer[3] ^ tx_buffer[4] ^ tx_buffer[5] ^ tx_buffer[6] ^ tx_buffer[7];
-				*tx_bytes=9;
+				tx_buffer[8] = curr_pwm;
+				tx_buffer[9] = tx_buffer[3] ^ tx_buffer[4] ^ tx_buffer[5] ^ tx_buffer[6] ^ tx_buffer[7] ^ tx_buffer[8];
+				*tx_bytes=10;
 			}
 			break;
 		case CMD_EXT_GET_LIMITS:
@@ -1027,7 +1063,7 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t * tx_by
 					target_speed = cmd2;
 			}
 		} else if (cmd1 == CMD_EXT_SET_DEFAULT_SPEED) {
-			if (cmd2 > 0) {
+			if (cmd2 > 1) {
 				motor_write_setting(DEFAULT_SPEED_EEPROM, cmd2);
 				default_speed = cmd2;
 				dance();

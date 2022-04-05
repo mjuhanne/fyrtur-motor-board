@@ -54,7 +54,7 @@ UART_HandleTypeDef huart1;
 DMA_HandleTypeDef hdma_usart1_rx;
 DMA_HandleTypeDef hdma_usart1_tx;
 
-extern idle_mode_sleep_delay;
+extern uint32_t idle_mode_sleep_delay;
 
 /* USER CODE BEGIN PV */
 

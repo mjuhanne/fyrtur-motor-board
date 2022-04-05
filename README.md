@@ -5,32 +5,32 @@
 This is a custom firmware for the TQL25-KT972 motor module (powered by the STM32F030K6T6 ARM microcontroller) used by IKEA Fyrtyr and Kadrilj roller blinds.
 
 
-## IMPORTANT INFORMATION ABOUT CURRENT SENSING FUNCTIONALITY
+### IMPORTANT INFORMATION ABOUT LOWER SPEEDS AND CURRENT SENSING FUNCTIONALITY
 
-TLDR; This should be safe BUT DON'T COME AFTER ME WITH A LAWYER IF YOUR HOUSE BURNS DOWN :)
+TLDR; Please update to version 0.85 :)
 
-Versions 0.82 (and earlier) have a predefined maximum motor current limit setting (1A default, configurable up to 2A).
-This software limit can cause annoyances on some motor units which have higher static and/or dynamic friction than anticipated. This causes inconsistently high power draw and thus the firmware makes false assumption that the motor is stalled 
-and the firmware then resets its known position to zero (upmost position) erroneously. When this position mismatch 
-occurs it's a recipe for disaster because when the user (or most likely the home automation system as scheduled) 
-tries to roll blinds down it causes movement further below the absolute lower limit, after which blinds start to move up 
-but in reverse orientation.
-This can create an annoying mess with wrinkled curtains and even damage the gluing between the curtains and the axel rod!
+UPDATE 5.4.2022: Versions 0.83 and 0.84 had the maximum motor current limit disabled because it was postulated that this 
+was causing false detection of motor stalling. This however seems no to be the case, so from 0.85 the limit is re-enabled with
+a maximum current of 2A. 
 
-This false stall detection behaviour has sometimes occured even after blinds have started to rotate a bit and they should be 
-free of static friction, so it's possible that abnormal current spikes might be detected by the current sensing circuitry 
-also after initial movement.
+Problems with motor stalling usually occur with lower speeds (< 5 RPM) and the main reason this is most likely because the motor not designed to be used with such low voltages associated with these speeds. For example with 2 RPM the PWM duty cycle causes the effective voltage to be 1.2V - 1.8V which makes the motor more suspectible for stalling should there be any extra friction during movement. 
 
-The current limit feature in this firmware was designed to be an extra layer of safety in addition to the fuse on the custom (NOT ORIGINAL!) Fyrtur board. The main method of stall detection is via timeout of signals from the Hall sensors. 
+Normally when motor stalls the system assumes the curtains are winded up for calibration and resets its position to zero. However if the motor stalls prematurely on lower speeds, there's a position mismatch which might later cause movement of the curtains outside the physical lower limit and eventually rewinding of the curtains in the opposite direction. This could cause annoying mess with wrinkled curtains and even damage the gluing between the curtains and the axel rod!
+
+Few changes were made to 0.85 to make premature stalling less likely or at least the recovery from this more robust. The most important is a new feature called MINIMUM CALIBRATION CURRENT (by default this is 500 mA). In my tests I've measured currents during normal calibration (when stalling at the top) to be around 1-2A depending on the motor speed, where as the problematic stalls occur usually with less than 300 mA. 
+So if the motor stalls at levels lower than the minimum calibration current, it is assumed that the curtains aren't really
+at the top position and the position is not reset in this case. Even though the motor has stopped it's correct position is 
+still known.
+
+If these problematic stalls happens, you can try using a higher speeds or try to make sure there isn't any extra friction in the system (such as those protruding metal tabs in the motor housing when it was disassembled and reassembled). In any case,
+it seems that 3-4 RPM is the minimum speed which the Fyrtur can sustaing without stalling but your mileage may wary.
+
+Regarding the maximum current limit feature in this firmware, it was designed to be an extra layer of safety in addition to the fuse on the custom (NOT ORIGINAL!) Fyrtur board. The main method of stall detection is via timeout of signals from the Hall sensors. 
 This is also the way the original firmware works as far as I know. In my reverse engineering project of the original Ikea motor firmware I didn't find any evidence that the current sensing circuitry would be used for stall detection (take this with a grain of salt - it's possible that I have overlooked this part of the code). So it seems that even Ikea (or the 
-subcontractor that manufactured the motor module) didn't bother to use the current sensing circuitry, possibly because
-of these glitches.
+subcontractor that manufactured the motor module) didn't bother to use the current sensing circuitry even though the hardware
+is there.
 
-This makes me conclude that in order to avoid annoying false stall detection and position mismatches it should be safe to 
-disable the current sensing feature and to rely solely on the Hall sensor timeout (296 ms by default). After all, the current sensing is an extra feature not implemented originally by the manufacturer. Needless to say, this kind of software feature, even if enabled, doesn't prevent from possible programming errors or physical catastrofic failures. Thus it's mandatory that other precautions are made to prevent too high current consumption in case of actual faulty operation.  Most (if not all) power adapters shut down the output if their maximum current draw is exceeded. The original Fyrtur board doesn't have any kind of fuse, but the Li-Ion battery modules are specified to have maximum 2A output. So I would like to assume that they have an internal current limiting / protection circuitry, BUT I HAVEN'T TESTED THEIR SAFETY WHEN SHORT CIRCUITED NOR DO I WANT TO!  
-
-So, from version 0.83 and onwards the current sensing feature is disabled, but can be re-enabled if needed
-via CMD_EXT_SET_MAX_MOTOR_CURRENT command.
+Needless to say, this kind of software feature, even if enabled, doesn't prevent from possible programming errors or physical catastrofic failures. Thus it's mandatory that other precautions are made to prevent too high current consumption in case of actual faulty operation.  Most (if not all) power adapters shut down the output if their maximum current draw is exceeded. The original Fyrtur board doesn't have any kind of fuse, but the Li-Ion battery modules are specified to have maximum 2A output. So I would like to assume that they have an internal current limiting / protection circuitry, BUT I HAVEN'T TESTED THEIR SAFETY WHEN SHORT CIRCUITED NOR DO I WANT TO!  
 
 # Features
 
