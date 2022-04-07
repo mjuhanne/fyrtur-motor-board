@@ -58,16 +58,21 @@ extern uint32_t idle_mode_sleep_delay;
 
 /* USER CODE BEGIN PV */
 
+// UART RX buffers
 DMA_Event_t dma_uart_rx = {0,0,UART_DMA_BUF_SIZE};
-
 uint8_t uart_dma_rx_buffer[UART_DMA_BUF_SIZE]; // circular DMA rx buffer
-
 uint8_t uart_rx_buffer[UART_DMA_BUF_SIZE]; // contains newly received data
 uint16_t uart_rx_buffer_len = 0;
-uint8_t uart_tx_buffer[16];
+
+// UART TX buffers
+uint8_t uart_dma_tx_buffer[UART_DMA_BUF_SIZE]; // circular DMA tx buffer
+uint8_t uart_dma_tx_size = 0;  // the chunk size which is being transferred currently
+uint16_t uart_dma_tx_buffer_len = 0;  // bytes in the circular buffer 
+uint16_t uart_dma_tx_buffer_high_ptr = 0; // pointer for writing new data
+uint16_t uart_dma_tx_buffer_low_ptr = 0; // pointer for reading data to DMA
+uint8_t uart_tx_buffer[16]; // contains newly assembled packet to be transferred to DMA buffer
 
 uint8_t blink;
-uint8_t uart_tx_busy;
 
 uint16_t adc_buf[ADC_BUF_LEN];
 
@@ -145,7 +150,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim)
 }
 
 uint8_t uart_tx_done() {
-  return !uart_tx_busy;
+  return uart_dma_tx_buffer_len == 0;
 }
 
 void uart_start_rx_DMA() {
@@ -156,6 +161,61 @@ void uart_start_rx_DMA() {
   __HAL_DMA_DISABLE_IT(huart1.hdmarx, DMA_IT_HT);  // disable half-transfer interrupt
   // Reset also the buffer pointer
   dma_uart_rx.prevCNDTR = UART_DMA_BUF_SIZE;
+}
+
+void uart_do_transmit_msg() {
+    if (uart_dma_tx_buffer_low_ptr + uart_dma_tx_buffer_len < UART_DMA_BUF_SIZE) {
+      // we can transfer the whole tx buffer right away
+      uart_dma_tx_size = uart_dma_tx_buffer_len;
+    } else {
+      // we can transfer bytes only up to the end of circular buffer
+      uart_dma_tx_size = UART_DMA_BUF_SIZE - uart_dma_tx_buffer_low_ptr;
+    }
+    HAL_UART_Transmit_DMA(&huart1, &uart_dma_tx_buffer[uart_dma_tx_buffer_low_ptr], uart_dma_tx_size);
+}
+
+void uart_send_msg(uint8_t * data, int tx_bytes) {
+
+  if (uart_dma_tx_buffer_len + tx_bytes > UART_DMA_BUF_SIZE) {
+    // Buffer overrun shouldn't happen in normal use! Should this occur when debugging/testing, skip sending this message
+    // so that previous data in tx buffer is not overwritten
+    blink += 5;
+    return;
+  }
+  // transfer the packet to circular tx buffer  
+  for (int i=0;i<tx_bytes;i++) {
+    uart_dma_tx_buffer[ uart_dma_tx_buffer_high_ptr++ ] = data[i];
+    if (uart_dma_tx_buffer_high_ptr >= UART_DMA_BUF_SIZE) {
+      uart_dma_tx_buffer_high_ptr = 0;
+    }
+    uart_dma_tx_buffer_len++;
+  }
+  // if DMA tx is not busy we can send the packet right away. Otherwise continue sending in HAL_UART_TxCpltCallback
+  if (uart_dma_tx_size == 0) {
+    uart_do_transmit_msg();
+  }
+}
+
+void send_error_msg() {
+    // Send ERROR MSG: Send back the number of bytes received and 
+    // 1) first four received bytes if we received less bytes than anticipated (6 bytes)
+    // 2) the 2 command bytes and checksum (because we received 6 bytes but there was checksum mismatch)
+    uart_tx_buffer[0] = 0xde;
+    uart_tx_buffer[1] = 0xad;
+    uart_tx_buffer[2] = uart_rx_buffer_len;
+    if (uart_rx_buffer_len<6) {
+      uart_tx_buffer[3] = uart_rx_buffer[0];
+      uart_tx_buffer[4] = uart_rx_buffer[1];
+      uart_tx_buffer[5] = uart_rx_buffer[2];
+      uart_tx_buffer[6] = uart_rx_buffer[3];
+    } else {
+      uart_tx_buffer[3] = uart_rx_buffer[3];
+      uart_tx_buffer[4] = uart_rx_buffer[4];
+      uart_tx_buffer[5] = uart_rx_buffer[5];
+      uart_tx_buffer[6] = 0;
+    }
+    uart_tx_buffer[7] = uart_tx_buffer[3] ^ uart_tx_buffer[4] ^ uart_tx_buffer[5] ^ uart_tx_buffer[6];
+    uart_send_msg(uart_tx_buffer, 8);
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
@@ -185,18 +245,23 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
 		if ( (length==0) && (uart_rx_buffer_len>0) ) {
 			// There was incomplete packet waiting for the rest of the data which never came..
-			// Send ERROR MSG: Send back the number of bytes received and first four received bytes
-			uart_tx_buffer[0] = 0xde;
-			uart_tx_buffer[1] = 0xad;
-			uart_tx_buffer[2] = uart_rx_buffer_len;
-			uart_tx_buffer[3] = uart_rx_buffer[0];
-			uart_tx_buffer[4] = uart_rx_buffer[1];
-			uart_tx_buffer[5] = uart_rx_buffer[2];
-			uart_tx_buffer[6] = uart_rx_buffer[3];
-			uart_tx_buffer[7] = uart_tx_buffer[3] ^ uart_tx_buffer[4] ^ uart_tx_buffer[5] ^ uart_tx_buffer[6];
-      uart_tx_busy = 1;
-			HAL_UART_Transmit_DMA(&huart1, uart_tx_buffer, 8);
-			uart_rx_buffer_len = 0;
+      if ( (uart_rx_buffer_len >= 5) && (uart_rx_buffer[0]==0xff) && (uart_rx_buffer[1]==0x9a) ) {
+        // After waking up we lost the first byte (0x00) but the two other bytes match, so let's try to process this
+
+        // shift buffer 1 byte forward..
+        for(i=0; i<uart_rx_buffer_len; i++)
+        {
+          uart_rx_buffer[i+1] = uart_dma_rx_buffer[i];
+        }
+        // and add the missing first byte
+        uart_rx_buffer[0] = 0x00;
+        uart_rx_buffer_len++;
+        // .. processing continues below..
+
+      } else {
+        send_error_msg();
+        uart_rx_buffer_len = 0;
+      }
 		}
 	}
 	else                /* DMA Rx Complete event */
@@ -222,8 +287,13 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 			if (tx_bytes) {
 				uart_tx_buffer[0] = 0x00;
 				uart_tx_buffer[1] = 0xff;
-        uart_tx_busy = 1;
-				HAL_UART_Transmit_DMA(&huart1, uart_tx_buffer, tx_bytes);
+        // calculate checksum
+        uint8_t checksum = 0;
+        for (i=3; i<tx_bytes-1; i++) {
+          checksum = checksum ^ uart_tx_buffer[i];
+        }
+        uart_tx_buffer[tx_bytes-1] = checksum;
+        uart_send_msg(uart_tx_buffer, tx_bytes);
 			}
 //      blink += 1;
 			pos += 6;
@@ -251,7 +321,18 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 }
 
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart) {
-  uart_tx_busy = 0;
+  // UART DMA TX is complete. Adjust buffer size and low pointer (read pointer)
+  uart_dma_tx_buffer_len -= uart_dma_tx_size;
+  uart_dma_tx_buffer_low_ptr += uart_dma_tx_size;
+  if (uart_dma_tx_buffer_low_ptr >= UART_DMA_BUF_SIZE) {
+    uart_dma_tx_buffer_low_ptr -= UART_DMA_BUF_SIZE;
+  }
+  if (uart_dma_tx_buffer_len > 0) {
+    // transfer more data
+    uart_do_transmit_msg();
+  } else {
+    uart_dma_tx_size = 0;
+  }
 }
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
@@ -319,7 +400,7 @@ void enter_sleep_mode() {
   HAL_GPIO_WritePin(PWR_EN_GPIO_Port, PWR_EN_Pin, GPIO_PIN_RESET);
 
 #ifdef BLINK_LEDS_WHEN_SLEEP_MODE_CHANGES
-  blink_led(100,3);
+  blink_led(100,1);
 #endif
 
   // stop SysTick
@@ -354,7 +435,7 @@ void enter_sleep_mode() {
   uart_start_rx_DMA();
 
 #ifdef BLINK_LEDS_WHEN_SLEEP_MODE_CHANGES
-  blink_led(100,3);
+  blink_led(100,1);
 #endif
 
   HAL_ADC_Start_DMA(&hadc, (uint32_t*)adc_buf, ADC_BUF_LEN);
@@ -378,8 +459,6 @@ int main(void)
 {
   /* USER CODE BEGIN 1 */
   htim1.Instance = NULL;
-  uart_tx_busy = 0;
-
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/

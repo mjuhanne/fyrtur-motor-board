@@ -9,7 +9,15 @@
 #define SRC_MOTOR_H_
 
 #define VERSION_MAJOR 0
-#define VERSION_MINOR 85
+#define VERSION_MINOR 86
+
+// Decimal bits (floating point values stored in integer)
+#define RPM_DECIMAL_BITS 2  // RPM is stored internally and also sent to UART with this precision
+
+// Multipliers for receiving and sending values from/to UART (so big numbers, so few bits..)
+#define MOTOR_CURRENT_SHIFT_BITS 4
+#define STALL_DETECTION_TIMEOUT_SHIFT_BITS 3
+#define IDLE_MODE_SLEEP_DELAY_SHIFT_BITS 8
 
 #define GEAR_RATIO 171
 
@@ -21,7 +29,7 @@
 
 #define DEFAULT_FULL_CURTAIN_LEN GEAR_RATIO * (13 + 265.0/360) * 4
 
-#define DEFAULT_TARGET_SPEED 18	// RPM
+#define DEFAULT_TARGET_SPEED 18 // RPM
 #define READ_DEFAULT_SPEED_FROM_EEPROM  // Reads default speed from EEPROM if it's stored there. Otherwise use the value above
 
 #define DEFAULT_AUTO_CAL_SETTING 1	// auto-calibration is enabled by default
@@ -110,13 +118,12 @@ typedef enum motor_status_t {
 	Stopping,
 	CalibratingEndPoint,
 	Bootloader,
+	Stalled,
 	Error
 } motor_status_t;
 
 typedef enum motor_error_t {
 	NoError = 0,
-	StalledMovingUp,
-	StalledMovingDown,
 	FrictionError
 } motor_error_t;
 

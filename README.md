@@ -280,12 +280,15 @@ See Position chapter below for more information
 
 ##### CMD_EXT_SET_SPEED
 `00 ff 9a 20 XX CHECKSUM`
-- Set the motor speed to XX (in RPM). Normal values are between 1 and 25 RPM.In contrast to CMD_SET_DEFAULT SPEED, this will not be written to non-volatile memory which has limited write cycles. 
-This means that this command can be used to change motor speed real time without a fear of deteriorating flash memory.
+- Set the motor speed to XX (in RPM with lowest 2 decimal bits e.g. 0x0E = 3.5 RPM). Normal values are between 1 and 25 RPM.
+In contrast to CMD_SET_DEFAULT SPEED, this will not be written to non-volatile memory which has limited write cycles. 
+This means that this command can be used to change motor speed daily without a fear of deteriorating flash memory.
 
 ##### CMD_EXT_SET_DEFAULT_SPEED
 `00 ff 9a 30 XX CHECKSUM`
-- Set the default motor speed to XX (in RPM). Normal values are between 1 and 25 RPM. In contrast to CMD_SET_SPEED, this will be written to non-volatile memory. 
+- Set the default motor speed to XX (in RPM with lowest 2 decimal bits e.g. 0x0E = 3.5 RPM). 
+Normal values are between 1 and 25 RPM. In contrast to CMD_SET_SPEED, this will be written to non-volatile memory 
+so don't use it to switch speeds daily!
 
 ##### CMD_EXT_SET_MINIMUM_VOLTAGE
 `00 ff 9a 40 XX CHECKSUM`
@@ -321,13 +324,16 @@ The motor module response consists of 8 bytes and follows this pattern:
 
 The motor module response consists of 8 bytes and follows this pattern:
 
-`0x00 0xff 0xda MODULE_STATUS MOTOR_CURRENT POSITION_DEC POSITION_FRAC CHECKSUM`
+`0x00 0xff 0xda MODULE_STATUS MOTOR_CURRENT RPM POSITION_DEC POSITION_FRAC MOTOR_PWM RESERVED CHECKSUM`
  - The First 3 bytes is the header
- - MODULE_STATUS (0=Stopped, 1=Moving, 2=Error)
- - MOTOR_CURRENT (in mA).
+ - MODULE_STATUS (0=Stopped, 1=Moving.. etc. See motor_status_t in motor.h)
+ - MOTOR_CURRENT (in mA divided by 16).
+ - RPM (with 2 decimal bits, e.g. 0x0E equals 3.5 RPM)
  - POSITION_DEC and POSITION_FRAC report the curtain position with higher resolution
   - POS = POSITION_DEC + POSITION_FRAC/256).
- - CHECKSUM is a bitwise XOR of the (MODULE_STATUS,MOTOR_CURRENT,POSITION_DEC,POSITION_FRAC) bytes.
+ - MOTOR_PWM is the motor PWM duty cycle
+ - RESERVED = 0x00 (reserved for future use)
+ - CHECKSUM is a bitwise XOR of the data bytes (MODULE_STATUS, ... , RESERVED).
 
 ##### CMD_EXT_GET_LIMITS
 `00 ff 9a cc df 13`
@@ -348,9 +354,14 @@ The motor module response consists of 8 bytes and follows this pattern:
 
 ##### CMD_EXT_SET_MAX_MOTOR_CURRENT
 `00 ff 9a 62 XX CHECKSUM`
-- Sets the maximum motor current to XX. Warning! This can cause glitches (see the section about current sensing functionality above). Disabled by default.
-- Maximum current (mA) = XX * 16
-- XX : 0x00 (Disable current sensing. Default setting)
+- Sets the maximum motor current to XX (in mA divided by 16 e.g. 62 equals 992 mA)
+- Default is 2A (version >= 0.85)
+- XX : 0x00 (Disable current sensing)
+
+#### Debugging and fine-tuning commands
+
+There are also few debugging and fine-tuning related commands which are not documented here. Please see the code
+and know what you're doing if you're fiddling with them :)
 
 
 ## Curtain position and curtain length
