@@ -19,7 +19,7 @@ motor_direction_t direction;
  * GEAR_RATIO revolutions in order to actually reach 1 full revolution of the curtain rod. Motor revolution is detected by HALL sensor,
  * which generates 4 interrupts (ticks) per motor revolution.
  *
- * POSITION itself is a measure of curtain position reported by float between 0.0 (fully closed) and 100.0 (fully open) and can be
+ * POSITION itself is a measure of curtain position reported between 0.0 (fully closed) and 100.0 (fully open) and can be
  * calculated from LOCATION with location_to_position100 (and vice versa with position100_to_location).
  *
  * Maximum POSITION is affected by user-customizable max curtain length (configured via CMD_SET_MAX_CURTAIN_LENGTH). In addition to this,
@@ -35,11 +35,8 @@ uint8_t orientation = DEFAULT_ORIENTATION;
 uint32_t full_curtain_length = DEFAULT_FULL_CURTAIN_LEN;
 uint32_t max_curtain_length;
 
-uint16_t minimum_voltage;	// value is minimum voltage (in Volts) * 16 (float stored as interger value)
+uint16_t minimum_voltage;	// value is minimum voltage (in Volts) * 16 (fixed point integer)
 uint32_t idle_mode_sleep_delay;
-
-/* the motor driver gate PWM duty cycle is initially 60/255 when first energized and then adjusted according to target_speed */
-#define INITIAL_PWM 60
 
 uint8_t default_speed;	// with 2 bits of decimal precision
 uint8_t target_speed = 0; // target RPM (with 2 bits of decimal precision)
@@ -100,7 +97,7 @@ uint8_t flexispeed_sel = 0;	// selected setting
 uint8_t flexispeed_settings[] = { 3, 5, 15, 25 };	// speed settings in RPM
 // keeps track how many times CMD_UP is called repeatedly and if past FLEXISPEED_TRIGGER_LIMIT, then cycle to next speed setting
 uint8_t flexispeed_trigger_counter;	
-uint16_t last_command; // the last command issued (except CMD_GET_STATUS)
+uint16_t last_command; // the last command issued (except commands related to getting status)
 
 // statistics for debugging
 uint16_t dir_error = 0;
@@ -111,6 +108,7 @@ uint16_t highest_motor_current = 0;
 uint8_t pwm_when_stalled = 0;
 uint16_t stalled_moving_up_counter = 0;
 uint16_t stalled_moving_down_counter = 0;
+extern uint16_t lowest_voltage;
 
 // ----- Commands supported also by original Fyrtur module -----
 
@@ -146,7 +144,7 @@ uint16_t stalled_moving_down_counter = 0;
 #define CMD_EXT_GO_TO					0x10	// Target position is the lower 4 bits of the 1st byte + 2nd byte (12 bits of granularity), where lower 4 bits is the decimal part
 #define CMD_EXT_SET_SPEED 				0x20	// Speed with 2 decimal bits. Setting speed via this command will not alter non-volatile memory (so it's safe for limited write-cycle flash memory)
 #define CMD_EXT_SET_DEFAULT_SPEED 		0x30	// Speed with 2 decimal bits. Default speed will be stored to flash memory
-#define CMD_EXT_SET_MINIMUM_VOLTAGE		0x40	// Minimum voltage. Will be stored to flash memory
+#define CMD_EXT_SET_MINIMUM_VOLTAGE		0x40	// Minimum voltage. Will be stored to flash memory. Minimum voltage is 2nd byte divided by 16.
 #define CMD_EXT_SET_LOCATION			0x50	// Location is the lower 4 bits of the 1st byte + 2nd byte (1 sign bit + 11 bits of integer part)
 #define CMD_EXT_SET_AUTO_CAL			0x60	// If enabled, auto-calibration will roll up the blinds during power up in order to calibrate top curtain position. Enabled by default
 #define CMD_EXT_SET_ORIENTATION			0x61	// Sets curtain orientation (affects motor direction). (0 = normal orientation, default. 1 = reverse)
@@ -171,24 +169,30 @@ uint16_t stalled_moving_down_counter = 0;
 #define CMD_EXT_DEBUG	 			0xccd1
 #define CMD_EXT_SENSOR_DEBUG 		0xccd2
 #define CMD_EXT_ENTER_BOOTLOADER	0xff00
+#define CMD_EXT_FLEXISPEED_TRIGGER	0xff01 // force flexispeed triggering
+#define CMD_EXT_DANCE				0xff02 // test dance steps
+#define CMD_EXT_RESET_STATISTICS	0xff03
+
+#define STATUS_CMD_BYTE 0xcc // all "get status" commands start with this byte.
 
 // Steps for "acknowledge dance"
 motor_command_t dance_steps_up_down[] = {
 	MotorUp,
 	Stop,
 	MotorDown,
-	NoCommand
 };
 
 motor_command_t dance_steps_down_up[] = {
 	MotorDown,
 	Stop,
 	MotorUp,
-	NoCommand
 };
 
+#define MAX_DANCE_STEPS 8
 int dance_step_pos;
-motor_command_t * dance_steps;
+int dance_steps_num = 0;
+motor_command_t dance_steps[MAX_DANCE_STEPS];
+
 
 /****************** EEPROM variables ********************/
 
@@ -205,7 +209,7 @@ typedef enum eeprom_var_t {
 } eeprom_var_t;
 
 /* Virtual address defined by the user: 0xFFFF value is prohibited */
-uint16_t VirtAddVarTab[NB_OF_VAR] = {0x5555, 0x6666, 0x7777, 0x8880, 0x9999, 0xAAAA, 0xBBB1, 0xCCCC, 0xDDDD};
+uint16_t VirtAddVarTab[NB_OF_VAR] = {0x5555, 0x6666, 0x7770, 0x8880, 0x9999, 0xAAAA, 0xBBB1, 0xCCCC, 0xDDD0};
 
 
 void motor_set_default_settings() {
@@ -223,17 +227,25 @@ void motor_set_default_settings() {
 #ifndef SLIM_BINARY
 void motor_load_settings() {
 	uint16_t tmp;
-	if (EE_ReadVariable(VirtAddVarTab[MAX_CURTAIN_LEN_EEPROM], &tmp) != 0) {
-		tmp = max_curtain_length = DEFAULT_FULL_CURTAIN_LEN;	// by default, max_curtain_length is full_curtain_length
-		EE_WriteVariable(VirtAddVarTab[FULL_CURTAIN_LEN_EEPROM], tmp);
-	} else {
-		max_curtain_length = tmp;
-	}
 	if (EE_ReadVariable(VirtAddVarTab[FULL_CURTAIN_LEN_EEPROM], &tmp) != 0) {
 		tmp = full_curtain_length = DEFAULT_FULL_CURTAIN_LEN;
 		EE_WriteVariable(VirtAddVarTab[FULL_CURTAIN_LEN_EEPROM], tmp);
 	} else {
 		full_curtain_length = tmp;
+		// Sanity check..
+		if (full_curtain_length == 0) {
+			full_curtain_length = DEFAULT_FULL_CURTAIN_LEN;
+		}
+	}
+	if (EE_ReadVariable(VirtAddVarTab[MAX_CURTAIN_LEN_EEPROM], &tmp) != 0) {
+		tmp = max_curtain_length = DEFAULT_FULL_CURTAIN_LEN;	// by default, max_curtain_length is full_curtain_length
+		EE_WriteVariable(VirtAddVarTab[FULL_CURTAIN_LEN_EEPROM], tmp);
+	} else {
+		max_curtain_length = tmp;
+		// Sanity check..
+		if (max_curtain_length == 0) {
+			max_curtain_length = DEFAULT_FULL_CURTAIN_LEN;
+		}
 	}
 	if (EE_ReadVariable(VirtAddVarTab[MINIMUM_VOLTAGE_EEPROM], &tmp) != 0) {
 		tmp = minimum_voltage = DEFAULT_MINIMUM_VOLTAGE;
@@ -287,7 +299,7 @@ void motor_load_settings() {
 void motor_write_setting( eeprom_var_t var, uint16_t value ) {
 #ifndef SLIM_BINARY
 	uint16_t tmp;
-	if (status == Stopped) {
+	if ( (status == Stopped) || (status == Error) ) {
 		// motor has to be stopped to change non-volatile settings (writing to FLASH should occur uninterrupted)
 		EE_ReadVariable(VirtAddVarTab[var], &tmp);
 		if (tmp != value) {
@@ -297,17 +309,19 @@ void motor_write_setting( eeprom_var_t var, uint16_t value ) {
 #endif
 }
 
-uint32_t position100_to_location( float position ) {
-	if (position > 100)
+uint32_t position100_to_location( uint8_t position ) {
+	if (position >= 100) {
 		return max_curtain_length;
+	}
 	return position*max_curtain_length/100;
 }
 
 
-float location_to_position100() {
+// position is returned with 8 bits of fixed point decimal precision
+uint32_t location_to_position100fp() {
 	if (calibrating) {
 		// When calibrating we ignore our position and return 50% instead
-		return 50;
+		return 50 << POSITION_DECIMAL_BITS;
 	}
 	if (location < 0) {	// don't reveal positions higher than top position (should not happen if calibrated correctly)
 		return 0;
@@ -315,15 +329,15 @@ float location_to_position100() {
 	if  (status == CalibratingEndPoint) {
 		return 0;	// we don't publish the unstable position when doing top limit calibration
 	}
-	if (location > max_curtain_length) {
-		return 100;
+	if (location >= max_curtain_length) {
+		return 100 << POSITION_DECIMAL_BITS;
 	}
-	return 100*(float)location / max_curtain_length;
+	return (100<<POSITION_DECIMAL_BITS)*location / max_curtain_length;
 }
 
 
 // Returns RPM with 2 decimal bits
-float get_rpm() {
+uint16_t get_rpm() {
 	uint16_t rpm = 0;
 	if (hall_sensor_1_interval) {
 		// 60000 ms in minute
@@ -360,8 +374,8 @@ int process_sensor(motor_direction_t sensor_direction) {
 		}
 	}
 
-	// If motor is rotating, slow it down when approaching the target location
-	if ( (direction != None) && (target_location != -1) ) {
+	// If motor is rotating, slow it down when approaching the target location. Ignored for dance steps (we want fast moves!)
+	if ( (direction != None) && (target_location != -1) && (command != Dance)) {
 		int distance_to_target = abs(target_location - location);
 		if (distance_to_target < ((target_speed * slowdown_factor) >> (RPM_DECIMAL_BITS+3)) ) {
 			status = Stopping;
@@ -512,9 +526,8 @@ void motor_stall_check() {
 			highest_motor_current = curr;
 		}
 		if (max_motor_current != 0) {
-			if ( (curr > max_motor_current) && (hall_sensor_1_ticks > MIN_SENSOR_TICKS) ) {
-				// maximum current limit exceeded while moving -> motor has stalled. Note that because static friction
-				// can be quite high, we do not enforce the current limit if motor hasn't turned yet (no Hall sensor signals received)
+			if (curr > max_motor_current) {
+				// maximum current limit exceeded while moving -> motor has stalled.
 				motor_stopped();
 			}
 		}
@@ -534,27 +547,32 @@ void motor_stopped() {
 
 		motor_status_t current_status = status;
 		motor_direction_t current_direction = direction;
-		uint16_t motor_current = get_motor_current();
+		uint16_t motor_current = last_stalling_current = get_motor_current();
 		pwm_when_stalled = curr_pwm;
 
 		// De-energize the motor
 		motor_stop();
 
-		last_stalling_current = get_motor_current();
-
 		if (current_status == Moving)  {
-			if (hall_sensor_1_ticks > MIN_SENSOR_TICKS) {
-
-				if (current_direction == Up) {
-					if (motor_current > MINIMUM_CALIBRATION_CURRENT) {
-						// The motor has stalled with enough resistance (motor current) so we assume that we have reached 
-						// the top position. Now remaining is the endpoint calibration
-						// (adjusting for the backward movement because of curtain tension)
-						status = CalibratingEndPoint;
-						sensor_ticks_while_calibrating_endpoint = 0;	// for debugging
-						blink += 2;
-						// now we wait until curtain rod stabilizes				
-						endpoint_calibration_started_timestamp = HAL_GetTick();
+			if (current_direction == Up) {
+				if (motor_current > MINIMUM_CALIBRATION_CURRENT) {
+					// The motor has stalled with enough resistance (motor current) so we assume that we have reached 
+					// the top position. Now remaining is the endpoint calibration
+					// (adjusting for the backward movement because of curtain tension)
+					status = CalibratingEndPoint;
+					sensor_ticks_while_calibrating_endpoint = 0;	// for debugging
+					blink += 1;
+					// now we wait until curtain rod stabilizes				
+					endpoint_calibration_started_timestamp = HAL_GetTick();
+				} else {
+					if (hall_sensor_1_ticks == 0) {
+						// There hasn't been any signals from Hall sensor AND motor current is so low that the end-of-calibration
+						// wasn't triggered. Either the sensor is faulty OR blinds are already at the top position and
+						// calibration was attempted with so low speed that minimum calibration current wasn't exceeded. 
+						// Either way we cannot recover from this.
+						last_error = SensorError;
+						status = Error;
+						blink += 3;
 					} else {
 						// The motor has stalled but without too much resistance (motor current is low)
 						// This suggests that during low speed (usually RPM < 5) movement there was sudden increase in friction
@@ -562,30 +580,25 @@ void motor_stopped() {
 						// enough to ramp up the PWM duty cycle before Hall sensor timeout kicked in. 
 						// See MINIMUM_CALIBRATION_CURRENT definition
 						status = Stalled;
-						//blink += 4;
+						blink += 1;
 						// Recover from stalling, increase default speed by 0.25 RPM and increment counter for statistics
 						command = MotorUp;
 						stalled_moving_up_counter++;
 						default_speed += 1; // 0.25 RPM
 					}
-				} else {
-					// motor should not stall when direction is down! See comment above.
-					status = Stalled;
-					//blink += 4;
-					// Recover from stalling, increase default speed by 0.25 RPM and increment counter for statistics
-					command = MotorDown;
-					stalled_moving_down_counter++;
-					default_speed += 1; // 0.25 RPM
 				}
 			} else {
-				// motor has not even moved! Faulty Hall sensor or too much static friction 
-				last_error = FrictionError;
-				status = Error;
-				blink += 3;
+				// motor should not stall when direction is down! See comment above.
+				status = Stalled;
+				blink += 1;
+				// Recover from stalling, increase default speed by 0.25 RPM and increment counter for statistics
+				command = MotorDown;
+				stalled_moving_down_counter++;
+				default_speed += 1; // 0.25 RPM
 			}
 		} else if (current_status == Stopping) {
 			// Motor was accidently stalled during slowing down. Not really a problem since position is not lost and 
-			// the distance left to cover would usually be just a millimeter or two
+			// the distance left to cover would usually be just few millimeters
 			status = Stopped;
 		}
 	}
@@ -606,6 +619,13 @@ void motor_stop() {
 	HAL_GPIO_WritePin(HIGH_2_GATE_GPIO_Port, HIGH_2_GATE_Pin, GPIO_PIN_RESET);
 	TIM1->CCR1 = 0;
 	TIM1->CCR4 = 0;
+
+	if (status == CalibratingEndPoint) {
+		// Stop command was issued when already at top position. Don't leave blinds in the middle of calibration 
+		calibrating = 0;	// Limits will be enforced from now on 
+		location = 0;
+	}
+
 	status = Stopped;
 	last_error = NoError;
 	direction = None;
@@ -632,8 +652,14 @@ void motor_start_common(uint8_t motor_speed) {
 	blink += 1;
 	movement_started_timestamp = HAL_GetTick();
 	highest_motor_current = 0; // clear previous record
-	target_speed = motor_speed;
-	curr_pwm = INITIAL_PWM;
+	if (command == Dance) {
+		// For dance steps we use faster speed
+		target_speed = DANCE_STEP_SPEED << RPM_DECIMAL_BITS;
+		curr_pwm = INITIAL_PWM_FOR_DANCE_STEP;
+	} else {
+		target_speed = motor_speed;
+		curr_pwm = INITIAL_PWM;
+	}
 	status = Moving;
 	hall_sensor_1_ticks = 0;
 	hall_sensor_2_ticks = 0;
@@ -679,22 +705,32 @@ void motor_down(uint8_t motor_speed) {
 uint8_t check_voltage() {
 	if (minimum_voltage != 0) {
 		uint16_t voltage = get_voltage() / 30;
-		if (voltage < minimum_voltage)
+		if (voltage < minimum_voltage) {
 			return 0;
+		}
 	}
 	return 1;
 }
 #endif
 
-void process_next_command( motor_command_t next_command ) {
+
+// Returns 1 if command was processed succesfully (or omitted) and 0 if we want to defer processing it later
+uint8_t process_next_command( motor_command_t next_command ) {
+	if ( (next_command == MotorUp) || (next_command == MotorDown) ) {
+		if ( (status == Stopping) || (status == CalibratingEndPoint) ) {
+			// wait until we are ready
+			return 0;
+		}
+		if (!check_voltage()) {
+			// Too low voltage -> skip this command
+			return 1;
+		}
+	}
+
 	if (next_command == MotorUp) {
-		if (check_voltage()) {
-			motor_up(default_speed);
-		}
+		motor_up(default_speed);
 	} else if (next_command == MotorDown) {
-		if (check_voltage()) {
-			motor_down(default_speed);
-		}
+		motor_down(default_speed);
 	} else if (next_command == Stop) {
 		motor_stop();
 	} else if( next_command == EnterBootloader) {
@@ -705,6 +741,26 @@ void process_next_command( motor_command_t next_command ) {
 		reset_to_bootloader();
 		// .. not reached
 	}
+	return 1; // this command was processed
+}
+
+void add_dance_step( motor_command_t cmd ) {
+	if (dance_steps_num < MAX_DANCE_STEPS) {
+		dance_steps[dance_steps_num] = cmd;
+		dance_steps_num++;
+	}
+}
+
+motor_command_t get_next_dance_step() {
+	if (dance_steps_num > 0) {
+		motor_command_t cmd = dance_steps[0];
+		dance_steps_num--;
+		for (int i=0;i<dance_steps_num;i++) {
+			dance_steps[i] = dance_steps[i+1];
+		}
+		return cmd;
+	}
+	return NoCommand;
 }
 
 void dance() {
@@ -713,27 +769,30 @@ void dance() {
 	dance_step_pos = 0;
 	command = Dance;
 	if (location < (max_curtain_length/2)) {
-		dance_steps = dance_steps_down_up;
+		add_dance_step(MotorDown);
+		add_dance_step(MotorUp);
 	} else {
-		dance_steps = dance_steps_up_down;
+		add_dance_step(MotorUp);
+		add_dance_step(MotorDown);
 	}
 }
 
 void do_dance() {
 	if (status == Stopped) {
-		if (dance_steps[dance_step_pos] == NoCommand) {
-			// end of dance
-			command = NoCommand;
-		} else {
-			// do the next step
-			if (dance_steps[dance_step_pos] == MotorUp) {
-				target_location -= DANCE_STEP_LENGTH;
-			} else if (dance_steps[dance_step_pos] == MotorDown) {
-				target_location += DANCE_STEP_LENGTH;
+		motor_command_t next_command = get_next_dance_step();
+		if (next_command != NoCommand) {
+			if (next_command == MotorUp) {
+				target_location = location - DEG_TO_LOCATION(90);
+				if (target_location < 0) {
+					target_location = -1;
+				}
+			} else if (next_command == MotorDown) {
+				target_location = location + DEG_TO_LOCATION(90);
 			}
-			process_next_command( dance_steps[dance_step_pos] );
+			process_next_command( next_command );
+		} else {
+			command = NoCommand;
 		}
-		dance_step_pos++;
 	} else if (status == Error) {
 		command = NoCommand;
 	}
@@ -750,12 +809,15 @@ uint8_t check_flexispeed_trigger() {
 			if (flexispeed_sel >= sizeof(flexispeed_settings)) {
 				flexispeed_sel = 0;
 			}
-			uint8_t speed = flexispeed_settings[ flexispeed_sel ];
+			uint8_t speed = flexispeed_settings[ flexispeed_sel ] << RPM_DECIMAL_BITS;
 			motor_write_setting(DEFAULT_SPEED_EEPROM, speed);
 			default_speed = speed;
 			dance();
 			return 1;
 		}
+	} else {
+		// Using any other command than CMD_UP (besides get status commands) will reset the trigger counter
+		flexispeed_trigger_counter = 0;
 	}
 #endif
 	return 0;
@@ -765,36 +827,25 @@ void motor_process() {
 	if (command == Dance) {
 		do_dance();
 	} else if (command != NoCommand) {
-		process_next_command(command);
-		command = NoCommand;
+		if (process_next_command(command)) {
+			// command was processed
+			command = NoCommand;
+		} else {
+			// processing this command was deferred
+		}
 	}
 	if (idle_mode_sleep_delay > 0) {
 		if ( (status == Stopped) || (status == Error) ) {
 			if (!sleep_timer_enabled()) {
 				reset_sleep_timer();
 			} else {
-				if (sleep_timer_timeout()) {
+				if (sleep_timer_timeout() && uart_tx_done()) {
 					disable_sleep_timer();
 					enter_sleep_mode();
 				}
 			}
 		}
 	}
-}
-
-#define VOLTAGE_TO_INT(x) (int)(x*30*16)
-
-// Very rudimentary battery/voltage curve
-uint8_t calculate_battery() {
-	if (get_voltage() < VOLTAGE_TO_INT(6.5))
-		return 0x00;
-	if (get_voltage() <= VOLTAGE_TO_INT(7.0))
-		return 0x00 + (get_voltage() - VOLTAGE_TO_INT(6.5)) * (0x12 - 0x00) / (VOLTAGE_TO_INT(7.0) - VOLTAGE_TO_INT(6.5));
-	if (get_voltage() <= VOLTAGE_TO_INT(7.2))
-		return 0x12 + (get_voltage() - VOLTAGE_TO_INT(7.0)) * (0x2e - 0x12) / (VOLTAGE_TO_INT(7.2) - VOLTAGE_TO_INT(7.0));
-	if (get_voltage() <= VOLTAGE_TO_INT(7.5))
-		return 0x2e + (get_voltage() - VOLTAGE_TO_INT(7.2)) * (0x45 - 0x2e) / (VOLTAGE_TO_INT(7.5) - VOLTAGE_TO_INT(7.2));
-	return 0x45;
 }
 
 
@@ -815,8 +866,8 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t * tx_by
 		case CMD_GET_STATUS:
 			{
 				tx_buffer[2] = 0xd8;
-				tx_buffer[3] = calculate_battery();
-				tx_buffer[4] = (uint8_t)(get_voltage()/16);  // returned value in the message is Volts * 30 as in original FW
+				tx_buffer[3] = get_battery_level();
+				tx_buffer[4] = (uint8_t)(get_voltage()/16);  // returned value is Volts * 30 as in original FW
 				uint16_t rpm = get_rpm();
 				if ( (rpm < (1<<RPM_DECIMAL_BITS)) && 
 					( (status == Moving) || (status == Stopping) || (status == CalibratingEndPoint) || (status == Stalled) )) {
@@ -827,11 +878,19 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t * tx_by
 					rpm >>= RPM_DECIMAL_BITS;
 				}
 				tx_buffer[5] = (uint8_t)rpm;
-				tx_buffer[6] = location_to_position100();
+				// round the position up and return integer part
+				tx_buffer[6] = (uint8_t)( (location_to_position100fp()+(1<<(POSITION_DECIMAL_BITS-1))) >> POSITION_DECIMAL_BITS);
 				*tx_bytes=8;
 			}
 			break;
 
+		case CMD_EXT_FLEXISPEED_TRIGGER: 
+			{
+				// force the triggering of flexisped
+				flexispeed_trigger_counter = FLEXISPEED_TRIGGER_LIMIT;
+				last_command = CMD_UP;
+			}
+			// fall-through to CMD_UP
 		case CMD_UP:
 			{
 				if (!check_flexispeed_trigger()) {
@@ -875,15 +934,15 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t * tx_by
 
 		case CMD_OVERRIDE_UP_90:
 			{
-				target_location = location - DEG_TO_LOCATION(90);
-				command = MotorUp;
+				add_dance_step(MotorUp);
+				command = Dance;
 			}
 			break;
 
 		case CMD_OVERRIDE_DOWN_90:
 			{
-				target_location = location + DEG_TO_LOCATION(90);
-				command = MotorDown;
+				add_dance_step(MotorDown);
+				command = Dance;
 			}
 			break;
 
@@ -924,8 +983,8 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t * tx_by
 				// Emulate the functionality of the original firmware: Rewind 90 degrees up so that
 				// calibration is automatically done (this is because CMD_RESET_CURTAIN_LENGTH is 
 				// called by the Zigbee module when blinds are already at the top position). 
-				target_location = location - DEG_TO_LOCATION(90);
-				command = MotorUp;
+				add_dance_step(MotorUp);
+				command = Dance;
 			}
 			break;
 		case CMD_TOGGLE_ORIENTATION:
@@ -966,7 +1025,7 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t * tx_by
 			{
 				tx_buffer[2] = 0xd5;
 				tx_buffer[3] = slowdown_factor;
-				tx_buffer[4] = min_slowdown_speed;	// with RPM_DECIMAL_BITS of prceision
+				tx_buffer[4] = min_slowdown_speed;	// with RPM_DECIMAL_BITS of precision
 				tx_buffer[5] = stall_detection_timeout >> STALL_DETECTION_TIMEOUT_SHIFT_BITS;
 				tx_buffer[6] = max_motor_current >> MOTOR_CURRENT_SHIFT_BITS;
 				tx_buffer[7] = idle_mode_sleep_delay >> IDLE_MODE_SLEEP_DELAY_SHIFT_BITS;
@@ -992,8 +1051,8 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t * tx_by
 				tx_buffer[6] = pwm_when_stalled;
 				tx_buffer[7] = stalled_moving_up_counter;
 				tx_buffer[8] = stalled_moving_down_counter;
-				tx_buffer[9] = 0;	// reserved for future use
-				tx_buffer[10] = 0;  // reserved for future use
+				tx_buffer[9] = flexispeed_trigger_counter;
+				tx_buffer[10] = lowest_voltage/16;
 				*tx_bytes=12;
 			}
 			break;
@@ -1046,8 +1105,8 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t * tx_by
 					// report a minimal speed anyway so that controller module knows that we are not finished yet
 					rpm = 1; // 0.25 RPM
 				}
-				tx_buffer[5] = (uint8_t)rpm; // extended speed is with RPM_DECIMAL_BITS (2) bits of floating point precision
-				uint16_t pos = (location_to_position100() * 256); // float to integer with 8 bits of precision
+				tx_buffer[5] = (uint8_t)rpm; // extended speed is with RPM_DECIMAL_BITS (2) bits of decimal precision
+				uint16_t pos = location_to_position100fp(); // Position100 with 8 bits of fixed point precision
 				tx_buffer[6] = pos >> 8;
 				tx_buffer[7] = pos & 0xff;
 				tx_buffer[8] = curr_pwm;
@@ -1058,12 +1117,30 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t * tx_by
 		case CMD_EXT_GET_LIMITS:
 			{
 				tx_buffer[2] = 0xdb;
-				tx_buffer[3] = calibrating | (orientation<<1);
+				tx_buffer[3] = calibrating | (orientation<<1) | (auto_calibration<<2);
 				tx_buffer[4] = max_curtain_length >> 8;
 				tx_buffer[5] = max_curtain_length & 0xff;
 				tx_buffer[6] = full_curtain_length >> 8;
 				tx_buffer[7] = full_curtain_length & 0xff;
 				*tx_bytes=9;
+			}
+			break;
+		case CMD_EXT_DANCE:
+			{
+				dance();
+			}
+			break;
+		case CMD_EXT_RESET_STATISTICS:
+			{
+			 	dir_error = 0;
+				sensor_ticks_while_stopped = 0;
+				sensor_ticks_while_calibrating_endpoint = 0;
+				last_stalling_current = 0;
+				highest_motor_current = 0;
+				pwm_when_stalled = 0;
+				stalled_moving_up_counter = 0;
+				stalled_moving_down_counter = 0;
+				lowest_voltage = 8.4*16*30;
 			}
 			break;
 		default:
@@ -1156,7 +1233,9 @@ uint8_t handle_command(uint8_t * rx_buffer, uint8_t * tx_buffer, uint8_t * tx_by
 		}
 	}
 
-	if ( (cmd != CMD_GET_STATUS) && (cmd != CMD_EXT_GET_STATUS) ) {
+	if (cmd1 != STATUS_CMD_BYTE) {
+		// Save the last command so that we can check if flexi speed switching is triggered by 3 sequential CMD_UP commands.
+		// Between those commands we want to be able to get status updates without resetting the trigger counter though.
 		last_command = cmd;
 	}
 
@@ -1170,7 +1249,7 @@ void motor_init() {
 	reset_sleep_timer();
 
 	location = max_curtain_length; // assume we are at bottom position
-
+	
 	if (auto_calibration) {
 		calibrating = 1;
 		command = MotorUp;

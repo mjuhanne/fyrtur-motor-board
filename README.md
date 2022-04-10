@@ -144,7 +144,9 @@ file Release/fyrtur-motor-board.bin md5 checksum: 37264f7467389a6709a3f3bdea3597
 2020-11-15T14:17:15 INFO common.c: Flash written and verified! jolly good!
 ```
 
-If writing fails with `ERROR common.c: stlink_flash_loader_run(0x8000000) failed! == -1` try power-cycling the motor board and/or retry flashing.
+- If you have trouble connecting to the board (unknown chip id! 0x3748) then please try st-link v1.7.0 and use
+st-flash with **--connect-under-reset** option!
+- If writing fails with `ERROR common.c: stlink_flash_loader_run(0x8000000) failed! == -1` try power-cycling the motor board and/or retry flashing.
 
 ## OTA update
 

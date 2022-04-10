@@ -77,6 +77,7 @@ uint8_t blink;
 uint16_t adc_buf[ADC_BUF_LEN];
 
 uint16_t motor_current;
+uint16_t voltage;
 
 /* 
  * Used to track when motor is idle and no commands have been issued. 
@@ -102,23 +103,46 @@ static void MX_TIM3_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+uint16_t lowest_voltage = 8.4*16*30;
 
-// Calculate the average current of 32 previous measurements
+// Calculate the average voltage and current of 32 previous measurements
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
-	uint32_t avg = 0;
+	uint32_t avg_curr = 0, avg_voltage = 0;
 	for (int i=0;i<ADC_BUF_LEN/2;i++) {
-		avg += adc_buf[i*2+1] * 2;	// current in mA
+		avg_curr += adc_buf[i*2+1] * 2;	// current in mA
+		avg_voltage += adc_buf[i*2+0];	// values are Volts * 30 * 16
 	}
-	avg /= ADC_BUF_LEN/2;
-	motor_current = avg;
+	motor_current = avg_curr / (ADC_BUF_LEN/2);
+	voltage = avg_voltage / (ADC_BUF_LEN/2);
+  if (voltage < lowest_voltage) {
+    lowest_voltage = voltage;
+  }
 }
 
 uint16_t get_voltage() {
-	return adc_buf[0];	// values stored in adc_buf are voltages * 30 * 16;
+  return voltage;
 }
 
 uint16_t get_motor_current() {
 	return motor_current;
+}
+
+// S-shaped battery/voltage curve mimicking the values reported by original Fyrtur module
+uint8_t get_battery_level() {
+	uint16_t v = get_voltage() / 16; // For easier calculation use the values reported by original Fyrtur module
+	if (v < 200)
+		return 0;
+	if (v <= 215)
+		return 0 + (v - 200) * (16-0) / (215-200);
+	if (v <= 218)
+		return 16 + (v - 215) * (27-16) / (218-215);
+	if (v <= 221)
+		return 27 + (v - 218) * (43-27) / (221-218);
+	if (v <= 228)
+		return 43 + (v - 221) * (62-43) / (228-221);
+	if (v <= 246)
+		return 62 + (v - 228) * (91-62) / (246-228);
+	return 91 + (v - 246) * (100-91) / (255-246);
 }
 
 void pwm_start( uint32_t channel ) {
@@ -410,10 +434,18 @@ void enter_sleep_mode() {
   HAL_UART_DeInit(&huart1);
 
   GPIO_InitTypeDef GPIO_InitStruct = {0};
-  GPIO_InitStruct.Pin = GPIO_PIN_10;
+  GPIO_InitStruct.Pin = GPIO_PIN_10;  // UART1_RX
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+#ifdef WAKE_UP_USING_BUTTON
+  // Allow waking up with the debug button
+  GPIO_InitStruct.Pin = BUT_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(BUT_GPIO_Port, &GPIO_InitStruct);
+#endif
 
   // APB peripheral power interface clock needs to be enabled
   __HAL_RCC_PWR_CLK_ENABLE();
@@ -436,6 +468,20 @@ void enter_sleep_mode() {
 
 #ifdef BLINK_LEDS_WHEN_SLEEP_MODE_CHANGES
   blink_led(100,1);
+#endif
+
+#ifdef WAKE_UP_USING_BUTTON
+  // Disable BUTTON interrupt because it interferes with HALL #1 sensor interrupt
+  /*Configure GPIO pin : BUT_Pin */
+  GPIO_InitStruct.Pin = BUT_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(BUT_GPIO_Port, &GPIO_InitStruct);
+
+  GPIO_InitStruct.Pin = HALL_1_OUT_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(HALL_1_OUT_GPIO_Port, &GPIO_InitStruct);
 #endif
 
   HAL_ADC_Start_DMA(&hadc, (uint32_t*)adc_buf, ADC_BUF_LEN);

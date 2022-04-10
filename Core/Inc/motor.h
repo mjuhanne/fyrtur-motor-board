@@ -9,15 +9,17 @@
 #define SRC_MOTOR_H_
 
 #define VERSION_MAJOR 0
-#define VERSION_MINOR 86
+#define VERSION_MINOR 87
 
 // Decimal bits (floating point values stored in integer)
 #define RPM_DECIMAL_BITS 2  // RPM is stored internally and also sent to UART with this precision
+#define POSITION_DECIMAL_BITS 8
 
 // Multipliers for receiving and sending values from/to UART (so big numbers, so few bits..)
 #define MOTOR_CURRENT_SHIFT_BITS 4
 #define STALL_DETECTION_TIMEOUT_SHIFT_BITS 3
 #define IDLE_MODE_SLEEP_DELAY_SHIFT_BITS 8
+#define MINIMUM_VOLTAGE_DECIMAL_BITS 4
 
 #define GEAR_RATIO 171
 
@@ -25,7 +27,8 @@
 #define REVERSE_ORIENTATION	1	// Curtain is installed in reverse configuration (curtain rod is flipped to "front roll" configuration)
 
 // If != 0,  motor will be stopped if voltage drops below minimum voltage (in order to protect battery)
-#define DEFAULT_MINIMUM_VOLTAGE 0	// voltage check is bypassed
+#define DEFAULT_MINIMUM_VOLTAGE (int)(6.7*(1<<MINIMUM_VOLTAGE_DECIMAL_BITS))
+//#define DEFAULT_MINIMUM_VOLTAGE 0	// voltage check is bypassed
 
 #define DEFAULT_FULL_CURTAIN_LEN GEAR_RATIO * (13 + 265.0/360) * 4
 
@@ -42,11 +45,6 @@ at the top position. Note that this is upper limit is not enforced when starting
 */
 #define DEFAULT_MAX_MOTOR_CURRENT 2048 // in mA.  0 == DISABLED
 
-// We want at least this many sensor ticks to assume the motor is moving (and free of static friction). In reality
-// this should be lower number, but it can take few ticks before the measured current starts to drop even though static friction
-// has already been overcome. This is done because we don't want to erroneously think the motor is stalling 
-#define MIN_SENSOR_TICKS 8
-
 /* If no hall sensor interrupts are received during this time period, assume motor is stopped/stalled */
 #define DEFAULT_STALL_DETECTION_TIMEOUT 296 // Milliseconds.
 
@@ -58,13 +56,11 @@ at the top position. Note that this is upper limit is not enforced when starting
  */
 #define HALL_SENSOR_TIMEOUT_WHILE_STOPPING 1000 // Milliseconds.
 
-
 /*
  * After the motor is stalled, we wait a bit for the curtain tension to release and the curtain rod to settle. After this period
  * motor is considered to be in top position (location = 0)
  */
-#define ENDPOINT_CALIBRATION_PERIOD 1000 // Milliseconds
-
+#define ENDPOINT_CALIBRATION_PERIOD 400 // Milliseconds
 
 /* 
  * The minimum motor current (high enough resistance) which is needed to signal that the motor has indeed stalled
@@ -81,19 +77,21 @@ at the top position. Note that this is upper limit is not enforced when starting
  */
 #define MINIMUM_CALIBRATION_CURRENT 500 // mA
 
-
 /*
  * These parameters are used to slow down the motor speed when approaching the target location
  */
 #define DEFAULT_MINIMUM_SLOWDOWN_SPEED 5
 #define DEFAULT_SLOWDOWN_FACTOR 48
 
+/* the motor driver gate PWM duty cycle is initially 60/255 when first energized and then adjusted according to target_speed */
+#define INITIAL_PWM 60
+#define INITIAL_PWM_FOR_DANCE_STEP 100
+
 /*
  * "Dance" is a series of movement steps (up or down) that the firmware uses to signal the user that it has acknowleged
  * certain commands (such as CMD_SET_MAX_CURTAIN_LENGTH or CMD_SET_FULL_CURTAIN_LENGTH)
  */
-#define DANCE_STEP_LENGTH 100	// length of one dance step (measured in Hall sensor ticks)
-
+#define DANCE_STEP_SPEED 25
 
 /*
  * Flexi-speed is a mechanism to change the motor speed setting even when using the custom firmware 
@@ -101,15 +99,12 @@ at the top position. Note that this is upper limit is not enforced when starting
  * cycle between them by repeatedly rolling the blinds up (CMD_UP command) 3 times. Firmware then selects the next speed 
  * in the preset list and will signal the user by doing a little "down/up dance" curtain movement.
  */
-// disabled by default
-//#define FLEXISPEED_ENABLED
+#define FLEXISPEED_ENABLED
 
 /*
  * The number of repeated CMD_UP commands before we cycle to next speed preset setting
  */
 #define FLEXISPEED_TRIGGER_LIMIT 3
-
-
 
 
 typedef enum motor_status_t {
@@ -124,7 +119,7 @@ typedef enum motor_status_t {
 
 typedef enum motor_error_t {
 	NoError = 0,
-	FrictionError
+	SensorError
 } motor_error_t;
 
 typedef enum motor_direction_t {

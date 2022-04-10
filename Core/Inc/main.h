@@ -70,6 +70,7 @@ void pwm_start(uint32_t channel);
 void pwm_stop(uint32_t channel);
 uint16_t get_voltage(); // returned value is Volts * 30 * 16
 uint16_t get_motor_current();
+uint8_t get_battery_level();
 uint8_t uart_tx_done();
 
 void enter_sleep_mode();
@@ -118,9 +119,11 @@ void reset_sleep_timer();
 
 // If this is set to 0, sleep mode is disabled. Debugging with sleep mode on is quite challenging..
 #define DEFAULT_IDLE_MODE_SLEEP_DELAY 3000 // Milliseconds. After this period of inactivity the sleep mode is entered
+//#define DEFAULT_IDLE_MODE_SLEEP_DELAY 0 // Milliseconds. After this period of inactivity the sleep mode is entered
 
 // For debugging.
-//#define BLINK_LEDS_WHEN_SLEEP_MODE_CHANGES
+#define BLINK_LEDS_WHEN_SLEEP_MODE_CHANGES
+#define WAKE_UP_USING_BUTTON  
 
 /* USER CODE END Private defines */
 
