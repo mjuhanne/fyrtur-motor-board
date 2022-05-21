@@ -597,7 +597,7 @@ void motor_stopped() {
 				default_speed += 1; // 0.25 RPM
 			}
 		} else if (current_status == Stopping) {
-			// Motor was accidently stalled during slowing down. Not really a problem since position is not lost and 
+			// Motor was accidentally stalled during slowing down. Not really a problem since position is not lost and
 			// the distance left to cover would usually be just few millimeters
 			status = Stopped;
 		}
