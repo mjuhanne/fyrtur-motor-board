@@ -291,12 +291,16 @@ void motor_load_settings() {
 	} else {
 		stall_detection_timeout = tmp;
 	}
+#ifdef READ_DEFAULT_IDLE_MODE_SLEEP_DELAY_FROM_EEPROM
 	if (EE_ReadVariable(VirtAddVarTab[IDLE_MODE_SLEEP_DELAY_EEPROM], &tmp) != 0) {
 		tmp = idle_mode_sleep_delay = DEFAULT_IDLE_MODE_SLEEP_DELAY;
 		EE_WriteVariable(VirtAddVarTab[IDLE_MODE_SLEEP_DELAY_EEPROM], tmp);
 	} else {
 		idle_mode_sleep_delay = tmp;
 	}
+#else
+	idle_mode_sleep_delay = DEFAULT_IDLE_MODE_SLEEP_DELAY;
+#endif
 }
 #endif
 

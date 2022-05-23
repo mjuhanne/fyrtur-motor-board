@@ -120,6 +120,7 @@ void reset_sleep_timer();
 // If this is set to 0, sleep mode is disabled. Debugging with sleep mode on is quite challenging..
 #define DEFAULT_IDLE_MODE_SLEEP_DELAY 3000 // Milliseconds. After this period of inactivity the sleep mode is entered
 //#define DEFAULT_IDLE_MODE_SLEEP_DELAY 0 // Milliseconds. After this period of inactivity the sleep mode is entered
+#define READ_DEFAULT_IDLE_MODE_SLEEP_DELAY_FROM_EEPROM  // Reads default from EEPROM if it's stored there. Otherwise use the value above
 
 // For debugging.
 #define BLINK_LEDS_WHEN_SLEEP_MODE_CHANGES
