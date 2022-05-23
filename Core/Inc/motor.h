@@ -29,6 +29,7 @@
 // If != 0,  motor will be stopped if voltage drops below minimum voltage (in order to protect battery)
 #define DEFAULT_MINIMUM_VOLTAGE (int)(6.7*(1<<MINIMUM_VOLTAGE_DECIMAL_BITS))
 //#define DEFAULT_MINIMUM_VOLTAGE 0	// voltage check is bypassed
+#define READ_DEFAULT_MINIMUM_VOLTAGE_FROM_EEPROM  // Reads default from EEPROM if it's stored there. Otherwise use the value above
 
 #define DEFAULT_FULL_CURTAIN_LEN GEAR_RATIO * (13 + 265.0/360) * 4
 

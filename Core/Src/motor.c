@@ -247,12 +247,16 @@ void motor_load_settings() {
 			max_curtain_length = DEFAULT_FULL_CURTAIN_LEN;
 		}
 	}
+#ifdef READ_DEFAULT_MINIMUM_VOLTAGE_FROM_EEPROM
 	if (EE_ReadVariable(VirtAddVarTab[MINIMUM_VOLTAGE_EEPROM], &tmp) != 0) {
 		tmp = minimum_voltage = DEFAULT_MINIMUM_VOLTAGE;
 		EE_WriteVariable(VirtAddVarTab[MINIMUM_VOLTAGE_EEPROM], tmp);
 	} else {
 		minimum_voltage = tmp;
 	}
+#else
+	minimum_voltage = DEFAULT_MINIMUM_VOLTAGE;
+#endif
 #ifdef READ_DEFAULT_SPEED_FROM_EEPROM
 	if (EE_ReadVariable(VirtAddVarTab[DEFAULT_SPEED_EEPROM], &tmp) != 0) {
 		tmp = default_speed = DEFAULT_TARGET_SPEED << RPM_DECIMAL_BITS;
