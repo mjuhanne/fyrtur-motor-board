@@ -247,12 +247,16 @@ void motor_load_settings() {
 			max_curtain_length = DEFAULT_FULL_CURTAIN_LEN;
 		}
 	}
+#ifdef READ_DEFAULT_MINIMUM_VOLTAGE_FROM_EEPROM
 	if (EE_ReadVariable(VirtAddVarTab[MINIMUM_VOLTAGE_EEPROM], &tmp) != 0) {
 		tmp = minimum_voltage = DEFAULT_MINIMUM_VOLTAGE;
 		EE_WriteVariable(VirtAddVarTab[MINIMUM_VOLTAGE_EEPROM], tmp);
 	} else {
 		minimum_voltage = tmp;
 	}
+#else
+	minimum_voltage = DEFAULT_MINIMUM_VOLTAGE;
+#endif
 #ifdef READ_DEFAULT_SPEED_FROM_EEPROM
 	if (EE_ReadVariable(VirtAddVarTab[DEFAULT_SPEED_EEPROM], &tmp) != 0) {
 		tmp = default_speed = DEFAULT_TARGET_SPEED << RPM_DECIMAL_BITS;
@@ -287,12 +291,16 @@ void motor_load_settings() {
 	} else {
 		stall_detection_timeout = tmp;
 	}
+#ifdef READ_DEFAULT_IDLE_MODE_SLEEP_DELAY_FROM_EEPROM
 	if (EE_ReadVariable(VirtAddVarTab[IDLE_MODE_SLEEP_DELAY_EEPROM], &tmp) != 0) {
 		tmp = idle_mode_sleep_delay = DEFAULT_IDLE_MODE_SLEEP_DELAY;
 		EE_WriteVariable(VirtAddVarTab[IDLE_MODE_SLEEP_DELAY_EEPROM], tmp);
 	} else {
 		idle_mode_sleep_delay = tmp;
 	}
+#else
+	idle_mode_sleep_delay = DEFAULT_IDLE_MODE_SLEEP_DELAY;
+#endif
 }
 #endif
 
@@ -597,7 +605,7 @@ void motor_stopped() {
 				default_speed += 1; // 0.25 RPM
 			}
 		} else if (current_status == Stopping) {
-			// Motor was accidently stalled during slowing down. Not really a problem since position is not lost and 
+			// Motor was accidentally stalled during slowing down. Not really a problem since position is not lost and
 			// the distance left to cover would usually be just few millimeters
 			status = Stopped;
 		}

@@ -17,7 +17,7 @@ targetMCU: stm32f0x
 cpu: -mcpu=cortex-m0
 fpu: 
 floatAbi: 
-ldscript: STM32F030K6Tx_FLASH.ld # linker script
+ldscript: STM32F030K6TX_FLASH.ld # linker script
 
 # Compiler definitions. The -D prefix for the compiler will be automatically added.
 cDefinitions: 
