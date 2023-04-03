@@ -58,7 +58,11 @@ The motor is connected with 4 wires (TX, RX, GND, VCC). TX and RX are UART lines
 **This software is provided "as is". Use with caution and at your own risk! (See LICENSE file for DISCLAIMER)**
 
 #### Software installation
-For compiling the sources, install [STM32CubeIDE](https://www.st.com/en/development-tools/stm32cubeide.html) (I used version 1.4.2).  UPDATE: Currently I'm using Visual Studio Code and the "STM32 for VSCode" plugin.
+
+The easiest way to build this firmware, if you have a podman/docker compatible container runtime available, is
+via the container definition available at [Dockerfile](./Dockerfile). See the `Dockerfile` for instructions on how to build and use the container image.
+
+You can also install [STM32CubeIDE](https://www.st.com/en/development-tools/stm32cubeide.html) (I used version 1.4.2) or Visual Studio Code with the "STM32 for VSCode" plugin.
 
 Alternatively you can use binaries found in bin/ folder.
 
